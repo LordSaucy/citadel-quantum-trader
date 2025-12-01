@@ -1,0 +1,51 @@
+# -------------------------------------------------
+# Core trading & broker connectivity
+# -------------------------------------------------
+MetaTrader5==5.0.44                # Official MT5 Python API (binary wheels for Linux/macOS/Windows)
+ib_insync==0.9.71                  # Async‑friendly wrapper around the Interactive Brokers API
+
+# -------------------------------------------------
+# Data handling & numerical work
+# -------------------------------------------------
+pandas==2.2.2                      # Tabular data, time‑series utilities
+numpy==1.26.4                      # Fast array math (used by pandas, TA calculations)
+
+# -------------------------------------------------
+# Database (PostgreSQL / TimescaleDB) access
+# -------------------------------------------------
+psycopg2-binary==2.9.9            # Pure‑Python PostgreSQL driver (binary wheels)
+SQLAlchemy==2.0.30                 # ORM / Core SQL toolkit (optional but handy for migrations)
+
+# -------------------------------------------------
+# Metrics, monitoring & observability
+# -------------------------------------------------
+prometheus-client==0.20.0          # Exposes /metrics endpoint for Prometheus
+gunicorn==22.0.0                   # Production WSGI server (runs the Flask app)
+
+# -------------------------------------------------
+# Web API (Flask) & security
+# -------------------------------------------------
+Flask==3.0.3                       # Lightweight web framework
+Flask-Cors==4.0.0                 # Enables CORS for the Mission‑Control UI
+cryptography==42.0.5               # TLS support for PostgreSQL (sslmode=require) and any future crypto needs
+python-dotenv==1.0.1               # Loads optional .env files (useful for local dev)
+
+# -------------------------------------------------
+# HTTP helpers (used by the backup‑svc, optional external calls)
+# -------------------------------------------------
+requests==2.32.3                   # Simple HTTP client (used by the backup script for Spaces)
+aiohttp==3.9.5                     # Async HTTP client (if you ever need async calls)
+
+# -------------------------------------------------
+# Miscellaneous utilities used throughout the codebase
+# -------------------------------------------------
+PyYAML==6.0.1                      # YAML parsing (configuration files, alerts)
+tqdm==4.66.2                       # Progress bars for long‑running loops (e.g., back‑testing)
+schedule==1.2.2                    # Simple in‑process scheduler (used by the backup‑svc)
+
+# -------------------------------------------------
+# NOTE: Development‑only tools (pytest, black, flake8, etc.) are **not**
+# included here because they are not required at runtime.  Keep them
+# in a separate `requirements-dev.txt` if you need them for local
+# testing or CI linting.
+# -------------------------------------------------
