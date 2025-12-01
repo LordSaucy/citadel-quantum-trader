@@ -1,0 +1,196 @@
+# ----------------------------------------------------------------------
+# Production Docker‑Compose for Citadel Quantum Trader (CQT)
+# ----------------------------------------------------------------------
+#   • Engine (primary & standby) – runs the Python trading bot,
+#     exposes:
+#        • 8005  – Flask ConfluenceController API (TLS terminated by the LB)
+#        • 8000  – /metrics endpoint for Prometheus
+#   • PostgreSQL / TimescaleDB – immutable ledger
+#   • Prometheus – scrapes engine metrics, DB exporter, node‑exporter
+#   • Grafana – Mission‑Control UI (auto‑imports datasource & dashboards)
+#   • backup‑svc – tiny container that snapshots the DB volume & ships logs
+# ----------------------------------------------------------------------
+# NOTE:
+#   • All secrets (DB password, API token, broker credentials, etc.)
+#     are created **externally** on each engine droplet with:
+#        docker secret create <NAME> -
+#   • The .env file (checked‑in) holds static, non‑secret values.
+#   • The VPC CIDR is assumed to be 10.10.0.0/16 – adjust if yours differs.
+# ----------------------------------------------------------------------
+
+version: "3.9"
+
+# ----------------------------------------------------------------------
+# Networks – a single isolated bridge network shared by all containers.
+# ----------------------------------------------------------------------
+networks:
+  cqt-net:
+    driver: bridge
+
+# ----------------------------------------------------------------------
+# Volumes – persistent storage for DB, Prometheus, Grafana.
+# ----------------------------------------------------------------------
+volumes:
+  pg_data:          {}   # PostgreSQL data (NVMe block storage)
+  prom_data:        {}   # Prometheus TSDB
+  grafana_data:     {}   # Grafana dashboards / plugins
+
+# ----------------------------------------------------------------------
+# Services
+# ----------------------------------------------------------------------
+services:
+
+  # --------------------------------------------------------------
+  # 1️⃣  Engine – primary (the same compose file is used on the
+  #     standby droplet – the only difference is the droplet’s
+  #     private IP; the Load‑Balancer routes traffic to both.)
+  # --------------------------------------------------------------
+  engine:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:latest
+    container_name: cqt-engine
+    restart: unless-stopped
+    env_file: [.env]                     # static defaults (host, ports, modes)
+    secrets:
+      - POSTGRES_PASSWORD
+      - CQT_API_TOKEN
+      - MT5_PASSWORD
+      - IBKR_API_KEY
+      - IBKR_SECRET
+    ports:
+      - "8005:8005"   # ConfluenceController API (exposed to the LB)
+      - "8000:8000"   # /metrics endpoint (scraped by Prometheus)
+    depends_on:
+      - db
+    networks:
+      - cqt-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # --------------------------------------------------------------
+  # 2️⃣  PostgreSQL / TimescaleDB – immutable ledger
+  # --------------------------------------------------------------
+  db:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-db:latest
+    container_name: cqt-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cqt_user
+      POSTGRES_DB: cqt_ledger
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD   # Docker‑Secret
+    secrets:
+      - POSTGRES_PASSWORD
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    networks:
+      - cqt-net
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "cqt_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --------------------------------------------------------------
+  # 3️⃣  Prometheus – metrics collector
+  # --------------------------------------------------------------
+  monitor:
+    image: prom/prometheus:latest
+    container_name: cqt-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prom_data:/prometheus
+    networks:
+      - cqt-net
+    depends_on:
+      - engine
+      - db
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # --------------------------------------------------------------
+  # 4️⃣  Node Exporter – system metrics (optional but handy)
+  # --------------------------------------------------------------
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: cqt-node-exporter
+    restart: unless-stopped
+    pid: host
+    network_mode: host   # gives direct host metrics
+    depends_on:
+      - monitor
+
+  # --------------------------------------------------------------
+  # 5️⃣  Grafana – Mission‑Control UI
+  # --------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cqt-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASS}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning
+    networks:
+      - cqt-net
+    depends_on:
+      - monitor
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # --------------------------------------------------------------
+  # 6️⃣  Backup‑svc – tiny droplet (run on a separate VM, but we
+  #     keep the definition here for completeness; you will
+  #     `docker compose up -d backup` only on the backup VM.)
+  # --------------------------------------------------------------
+  backup:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-backup:latest
+    container_name: cqt-backup
+    restart: unless-stopped
+    environment:
+      DO_TOKEN: ${DO_PAT}
+      AWS_ACCESS_KEY_ID: ${DO_SPACES_KEY}
+      AWS_SECRET_ACCESS_KEY: ${DO_SPACES_SECRET}
+    volumes:
+      - pg_data:/srv/pg_data:ro          # read‑only mount of the DB volume
+      - /var/log:/srv/logs:ro            # host logs (will be tarred & uploaded)
+    networks:
+      - cqt-net
+    # No public ports – the backup VM only talks outbound to DO API & Spaces.
+    # You will schedule the script via cron inside the container or on the host.
+
+# ----------------------------------------------------------------------
+# Docker Secrets – **external** (created on each engine droplet beforehand)
+# ----------------------------------------------------------------------
+secrets:
+  POSTGRES_PASSWORD:
+    external: true
+  CQT_API_TOKEN:
+    external: true
+  MT5_PASSWORD:
+    external: true
+  IBKR_API_KEY:
+    external: true
+  IBKR_SECRET:
+    external: true
