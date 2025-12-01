@@ -1,0 +1,76 @@
+name: CQT Engine CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # needed for GHCR
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ---------- 1️⃣ Build image ----------
+      - name: Build Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: false               # we’ll push after tests pass
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/cqt-engine:${{ github.sha }}
+
+      # ---------- 2️⃣ Run unit / integration tests ----------
+      - name: Run test suite
+        run: |
+          # Spin up a temporary Postgres container for DB‑related tests
+          docker run -d --name pg-test -e POSTGRES_PASSWORD=test -e POSTGRES_USER=cqt_user \
+                     -e POSTGRES_DB=cqt_ledger -p 5432:5432 postgres:15
+          # Wait for DB to be ready
+          for i in {1..10}; do
+            docker exec pg-test pg_isready -U cqt_user && break || sleep 1
+          done
+          # Install test dependencies (they’re already in the image)
+          pip install -r requirements.txt
+          # Run pytest (or your own harness)
+          pytest tests/
+          # Clean up
+          docker rm -f pg-test
+
+      # ---------- 3️⃣ Push image to registry ----------
+      - name: Push Docker image
+        if: success()
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/cqt-engine:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/cqt-engine:latest
+
+      # ---------- 4️⃣ Tag a production release (optional) ----------
+      - name: Create production tag
+        if: success() && github.ref == 'refs/heads/main'
+        run: |
+          VERSION=$(date +'%Y.%m.%d')
+          git tag -a "prod-${VERSION}" -m "Production release ${VERSION}"
+          git push origin "prod-${VERSION}"
