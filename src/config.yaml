@@ -259,3 +259,24 @@ scorer:
   linear_weights_path: models/linear_weights.json
   tree_model_path:     models/tree_scorer.bin
   tree_feature_order:  models/tree_feature_order.json
+
+class Config:
+    def __init__(self):
+        with open('/opt/citadel/config/config.yaml') as f:
+            self.settings = yaml.safe_load(f)
+
+        # -----------------------------------------------------------------
+        # 1️⃣  Apply experiment‑specific overrides
+        # -----------------------------------------------------------------
+        exp = os.getenv('EXPERIMENT', 'BASELINE').upper()
+        if exp == 'WITH_LIR':
+            # Enable the Liquidity‑Imbalance Ratio guard
+            self.settings['risk_controls']['use_lir'] = True
+        elif exp == 'NO_LIR':
+            self.settings['risk_controls']['use_lir'] = False
+        # Add more branches for other experiments (XGBOOST_MODEL, DYNAMIC_RISK, …)
+
+        # -----------------------------------------------------------------
+        # 2️⃣  Choose the DB schema (default = public)
+        # -----------------------------------------------------------------
+        self.settings['db_schema'] = os.getenv('DB_SCHEMA', 'public')
