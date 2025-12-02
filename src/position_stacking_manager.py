@@ -873,3 +873,12 @@ class PositionStackingManager:
         # Sufficient depth – proceed
         return True
 
+# src/position_stacking_manager.py
+MEDIAN_ATR = cfg.get("median_atr", 0.001)   # 0.1 % of price, set after warm‑up
+VOL_THRESHOLD_MULT = cfg.get("vol_threshold_mult", 2.0)
+
+def max_allowed_stacks(symbol: str, current_atr: float) -> int:
+    """Return 3 by default, but shrink to 2 when volatility spikes."""
+    if current_atr > VOL_THRESHOLD_MULT * MEDIAN_ATR:
+        return 2
+    return 3
