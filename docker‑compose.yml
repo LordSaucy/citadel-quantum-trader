@@ -517,6 +517,25 @@ volumes:
   pgdata:
   grafana_data:
   loki-data:          # <-- new
+# -------------------------------------------------
+# 11️⃣ Loki → S3 Exporter (run nightly)
+# -------------------------------------------------
+loki-exporter:
+  image: amazon/aws-cli:2.15.31   # official AWS CLI image
+  container_name: citadel-loki-exporter
+  entrypoint: ["/opt/citadel/scripts/export_logs.sh"]
+  volumes:
+    - loki-data:/var/lib/loki:ro   # read‑only mount of Loki data
+    - ./scripts:/opt/citadel/scripts:ro
+  environment:
+    - AWS_DEFAULT_REGION=eu-west-1   # change to your region
+    # If you use instance‑profile IAM role, you don’t need keys.
+    # Otherwise, inject them via Docker secrets or env vars:
+    # - AWS_ACCESS_KEY_ID=xxxx
+    # - AWS_SECRET_ACCESS_KEY=yyyy
+  networks:
+    - backend
+  restart: "no"   # do NOT restart automatically
 
 
  
