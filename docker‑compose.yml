@@ -255,4 +255,12 @@ nginx-proxy:
   ...
   volumes:
     - ./heatmaps:/tmp/heatmaps   # host folder ./heatmaps maps to container /tmp/heatmaps
+
+    citadel-bot:
+  # … existing config …
+  stop_grace_period: 30s          # give the app up to 30 s to finish
+  # (optional) expose the stop signal explicitly
+  # (Docker defaults to SIGTERM, but you can be explicit)
+  # stop_signal: SIGTERM
+
  
