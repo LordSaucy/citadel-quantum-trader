@@ -294,6 +294,17 @@ class RiskManagementLayer:
         The stake is calculated as:
             stake = usable_capital * risk_fraction_from_schedule
         """
+          with engine.connect() as conn:
+        # 1️⃣ Base fraction (schedule or bucket_meta)
+        base_frac = _get_base_fraction(bucket_id, conn)
+
+        # 2️⃣ Apply any active edge‑decay modifier
+        final_frac = _apply_edge_modifier(bucket_id, conn, base_frac)
+
+    # 3️⃣ Compute stake in dollars
+    stake = equity * final_frac
+    return stake
+
         # 1️⃣ Get the risk fraction from the schedule (same as before)
         trade_idx = get_trade_counter(bucket_id) + 1
         if trade_idx in RISK_SCHEDULE:
