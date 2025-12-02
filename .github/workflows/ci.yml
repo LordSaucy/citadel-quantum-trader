@@ -410,5 +410,23 @@ jobs:
           path: |
             # the script prints to stdout; capture it
             output.txt
+jobs:
+  train-lightgbm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Train LightGBM model
+        run: python scripts/train_lightgbm.py
+      - name: Upload model as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightgbm-model
+          path: models/lightgbm_model.txt
 
 
