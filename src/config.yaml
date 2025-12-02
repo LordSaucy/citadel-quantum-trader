@@ -216,3 +216,18 @@ def compute_and_store(engine: "sqlalchemy.Engine"):
     log.info(f"[Corr] Avg correlation = {avg:.3f}")
     return avg, corr
 
+risk_schedule_normal:
+  1: 1.00
+  2: 1.00
+  3: 0.60
+  4: 0.50
+  5: 0.40
+  # …
+
+risk_schedule_defensive:
+  1: 0.50
+  2: 0.50
+  3: 0.30
+  4: 0.25
+  5: 0.20
+  # … 
