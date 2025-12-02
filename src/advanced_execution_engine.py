@@ -181,6 +181,14 @@ class IBKRGateway:
     # 2️⃣ Existing checks (regime, volatility, etc.)
     ...
 
+    if depth_ok:
+    depth_ok_gauge.labels(bucket_id=signal.bucket_id,
+                          symbol=signal.symbol).inc()
+else:
+    depth_ok_gauge.labels(bucket_id=signal.bucket_id,
+                          symbol=signal.symbol).dec()
+
+
     def send_order(self, symbol: str, side: str, qty: float, price: float) -> bool:
         logger.debug("IBKR order %s %s %.4f @ %.5f", side, symbol, qty, price)
         # TODO: integrate ib_insync / REST API here
