@@ -487,6 +487,19 @@ Add the new service definition (replace the placeholder you already have, or ins
       - vault
     # Run every hour via a simple cron inside the container
     command: ["sh", "-c", "while true; do python /app/dd_monitor.py; sleep 3600; done"]
+citadel-bot-1:
+  image: citadel/trader:latest
+  environment:
+    - BUCKET_ID=1
+    - USE_RISK_SCHEDULE=true          # <-- normal bucket (uses schedule)
+  ...
+
+citadel-bot-control:
+  image: citadel/trader:latest
+  environment:
+    - BUCKET_ID=99
+    - USE_RISK_SCHEDULE=false         # <-- control bucket (constant 0.5 %)
+  ...
 
 
  
