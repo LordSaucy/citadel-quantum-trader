@@ -299,3 +299,12 @@ async def main_loop():
         signal = await market_feed.wait_for_signal()
         asyncio.create_task(process_one_signal(signal))
         await asyncio.sleep(0)   # let the event loop schedule other tasks
+
+
+signal_engine = SignalEngine()
+
+while True:
+    df = market_feed.get_latest_dataframe()   # 1‑minute candles, depth, volume, etc.
+    regime = regime_detector.predict(df)      # returns "trend", "range", or "high_vol"
+    confluence = signal_engine.score(df, regime_label=regime)
+
