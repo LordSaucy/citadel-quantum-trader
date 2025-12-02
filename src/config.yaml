@@ -15,3 +15,29 @@ def reload_config():
     use_shadow_mode: true   # when true, bot logs signals but never sends orders
 
 scorer_mode: lightgbm   # or "linear" to fall back
+
+# -------------------------------------------------
+# Guard configuration – tweak thresholds without rebuilding
+# -------------------------------------------------
+guards:
+  sentiment:
+    guard_enabled: true
+    positive_threshold: 0.30   # >0.30 → reject (over‑optimistic)
+    negative_threshold: -0.30  # <-0.30 → reject (over‑pessimistic)
+
+  calendar:
+    lockout_enabled: true
+    lockout_margin_minutes: 30   # minutes before/after a high‑impact event
+
+  volatility_spike:
+    enabled: true
+    atr_multiplier: 2.0          # current ATR > baseline * 2 → reject
+    baseline_atr: 0.0005          # you can compute this daily and reload
+
+  shock_detector:
+    enabled: true
+    spread_multiplier: 3.0       # current spread > 3× avg spread → reject
+    max_tick_age_secs: 2         # quote older than 2 s → reject
+    lir_threshold: 0.6           # LIR > 0.6 → reject
+    min_depth: 0.02              # minimum depth as fraction of lot size
+
