@@ -41,3 +41,8 @@ guards:
     lir_threshold: 0.6           # LIR > 0.6 → reject
     min_depth: 0.02              # minimum depth as fraction of lot size
 
+# -------------------------------------------------
+# Guard parameters – keep this section up‑to‑date
+# -------------------------------------------------
+guards:
+  # (as shown earlier)
