@@ -474,3 +474,26 @@ async def test_order(payload: dict = Body(...)):
     order_success_total.inc()
     return {"status": "accepted", "order_id": uuid.uuid4().hex}
 
+import os
+import logging
+
+# Existing imports …
+from .mt5_adapter import MT5Adapter   # or ibkr_adapter
+
+log = logging.getLogger(__name__)
+
+def build_broker_adapter():
+    # -----------------------------------------------------------------
+    # Detect paper‑trading mode
+    # -----------------------------------------------------------------
+    paper_mode = os.getenv("PAPER_MODE", "false").lower() == "true"
+    if paper_mode:
+        log.info("🧪 Starting in PAPER‑TRADING mode – using demo broker")
+        # The adapter will read the secret path from VAULT_SECRET_PATH
+        # (which we will point at the demo secret in the compose file)
+        # and will also set a flag so that any “real‑money” safeguards
+        # (e.g. sending SMS alerts, writing to compliance logs) are disabled.
+        return MT5Adapter(paper_mode=True)   # <-- pass the flag downstream
+    else:
+        log.info("🚀 Starting in PRODUCTION mode")
+        return MT5Adapter(paper_mode=False)
