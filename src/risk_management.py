@@ -606,3 +606,31 @@ if avg_corr > high_thr:
 else:
     schedule = cfg["risk_schedule_normal"]
 f = schedule.get(trade_idx, schedule.get("default", 0.40))
+
+import numpy as np
+from collections import deque
+from config_loader import Config
+
+cfg = Config().settings
+BASELINE_ATR = cfg.get("baseline_portfolio_atr", 0.005)   # 0.5 % of equity, set after a warm‑up period
+MAX_DD_BASE   = cfg.get("max_drawdown_cap", 0.20)        # 20 % static cap
+
+# Keep a rolling window of equity values (e.g., last 30 days)
+EQUITY_WINDOW = deque(maxlen=30 * 24)   # 30 days × 24 hourly snapshots
+
+def update_equity_window(equity: float) -> None:
+    EQUITY_WINDOW.append(equity)
+
+def portfolio_atr() -> float:
+    """Simple ATR on the equity curve (high‑low / 2)."""
+    if len(EQUITY_WINDOW) < 2:
+        return BASELINE_ATR
+    diffs = [abs(EQUITY_WINDOW[i] - EQUITY_WINDOW[i-1]) for i in range(1, len(EQUITY_WINDOW))]
+    return np.mean(diffs) / np.mean(EQUITY_WINDOW)   # expressed as a fraction of equity
+
+def current_max_dd_allowed() -> float:
+    """Dynamic cap = base * (1 + vol_factor)."""
+    vol_factor = portfolio_atr() / BASELINE_ATR
+    # If volatility doubles, we cut the allowed DD in half:
+    return MAX_DD_BASE / max(vol_factor, 1.0)   # never increase above the static cap
+
