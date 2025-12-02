@@ -39,3 +39,46 @@ chunk_target_size: 1048576        # 1 MiB (default)
 table_manager:
   retention_deletes_enabled: true
   retention_period: 365d
+
+  # loki/local-config.yaml
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      directory: /loki
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v12
+      index:
+        prefix: index_
+        period: 24h
+
+compactor:
+  working_directory: /loki/compactor
+  shared_store: filesystem
+  # Retention – keep logs for 30 days (adjust as needed)
+  retention_enabled: true
+  retention_delete_delay: 48h
+  retention_delete_worker_interval: 1h
+  retention_delete_retention_period: 30d
+
+limits_config:
+  enforce_metric_name: false
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h   # 7 days (optional)
+
+chunk_target_size: 1048576
+table_manager:
+  retention_deletes_enabled: true
+  retention_period: 30d
+
