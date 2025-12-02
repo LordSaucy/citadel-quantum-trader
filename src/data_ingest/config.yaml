@@ -6,6 +6,7 @@ symbols:
   - USDJPY
   - AUDUSD
   - XAUUSD
+  - USDCAD
 # optional: start_date: "2024-01-01"
 # optional: end_date:   "2024-12-31"
 # provider: "mt5"   # or "polygon", "dukascopy"
@@ -16,3 +17,30 @@ CFG_PATH = pathlib.Path(__file__).with_name("config.yaml")
 def load():
     with open(CFG_PATH, "r") as f:
         return yaml.safe_load(f)
+
+# -----------------------------------------------------------------
+# How far back you want to keep data (in days).  The collector will
+# download any missing days up to today.
+# -----------------------------------------------------------------
+lookback_days: 30
+
+# -----------------------------------------------------------------
+# Choose the data source.  Supported values: mt5, polygon, dukascopy,
+# custom (you can implement your own fetcher in collector.py).
+# -----------------------------------------------------------------
+source: mt5
+
+# -----------------------------------------------------------------
+# Provider‑specific credentials (only the ones needed for the chosen source)
+# -----------------------------------------------------------------
+mt5:
+  login: YOUR_MT5_LOGIN
+  password: YOUR_MT5_PASSWORD
+  server: "ICMarkets-Demo01"   # or your broker’s MT5 server name
+
+polygon:
+  api_key: YOUR_POLYGON_API_KEY
+
+dukascopy:
+  # No auth needed for public historical data
+  # (you can add a proxy URL here if you wish)
