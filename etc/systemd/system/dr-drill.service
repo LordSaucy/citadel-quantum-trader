@@ -1,0 +1,25 @@
+# /etc/systemd/system/dr-drill.service
+[Unit]
+Description=Citadel Disaster‑Recovery Drill
+Wants=network-online.target
+After=network-online.target
+
+# If the script fails, trigger the failure‑handler service (see below)
+OnFailure=dr-drill-failure.service
+
+[Service]
+Type=oneshot
+# Working directory – adjust if you keep the script elsewhere
+WorkingDirectory=/opt/citadel/scripts
+ExecStart=/opt/citadel/scripts/dr_drill.sh
+# Capture stdout/stderr in the journal (helps debugging)
+StandardOutput=journal
+StandardError=journal
+# Make sure the service runs as a non‑root user (the same user that owns the Docker socket)
+User=citadel
+Group=citadel
+# Do not restart automatically – we want a manual/periodic run
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
