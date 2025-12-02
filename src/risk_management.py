@@ -548,7 +548,7 @@ def compute_stake(bucket_id: int, equity: float) -> float:
         f = RISK_SCHEDULE[min(trade_idx - 1, len(RISK_SCHEDULE) - 1)]
 
     # ---- optional per‑bucket flag (see 2.3) ----
-    use_schedule = os.getenv("USE_RISK_SCHEDULE", "true").lower() == "true"
+    use_schedule = = get_bucket_flag(bucket_id)
     if not use_schedule:
         f = 0.005   # example fallback: 0.5 % constant risk
 
