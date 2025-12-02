@@ -517,4 +517,25 @@ def build_execution_engine():
     from .advanced_execution_engine import AdvancedExecutionEngine
     return AdvancedExecutionEngine(shadow_mode=shadow_mode)
 
+import threading, time
+from .config_loader import load_config
+from .bot import CitadelBot
+
+def config_watcher(bot: CitadelBot, interval: int = 30):
+    last_cfg = bot.cfg_hash
+    while True:
+        time.sleep(interval)
+        new_cfg = load_config()
+        new_hash = hash(json.dumps(new_cfg, sort_keys=True))
+        if new_hash != last_cfg:
+            bot.apply_new_config(new_cfg)
+            last_cfg = new_hash
+            bot.logger.info("🔄 Config hot‑reloaded (optimised=%s)",
+                            os.getenv("USE_OPTIMISED_CFG", "false"))
+
+if __name__ == "__main__":
+    cfg = load_config()
+    bot = CitadelBot(cfg)
+    threading.Thread(target=config_watcher, args=(bot,), daemon=True).start()
+    bot.run()
 
