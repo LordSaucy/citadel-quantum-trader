@@ -1,3 +1,5 @@
+import sqlite3, datetime, json
+
 # --------------------------------------------------------------
 # 1️⃣ Parameter keys (add SMC knobs)
 # --------------------------------------------------------------
@@ -28,6 +30,28 @@ PARAM_BOUNDS = {
     "premium_discount_thresh": (0.0, 0.05),
     "max_confluence_score": (0.8, 1.0),
 }
+
+def log_run(best_vals, fitness):
+    db_path = "/opt/optimizer/optimiser_history.db"
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS runs (
+            ts TEXT PRIMARY KEY,
+            fitness REAL,
+            params TEXT
+        )
+    """)
+    cur.execute(
+        "INSERT OR REPLACE INTO runs (ts, fitness, params) VALUES (?,?,?)",
+        (datetime.datetime.utcnow().isoformat(),
+         fitness,
+         json.dumps(best_vals))
+    )
+    conn.commit()
+    conn.close()
+
+
 def write_new_config(best_vals: dict):
     # Load the base config (the one you already use)
     with open("/opt/optimizer/base_config.yaml") as f:
@@ -72,4 +96,6 @@ def evaluate(individual):
     # Pass recent_df to BacktestValidator instead of the full dataset
     validator = BacktestValidator(data=recent_df, **base_cfg)
     # … rest unchanged …
+
+
  
