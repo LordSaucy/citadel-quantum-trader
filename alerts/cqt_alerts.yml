@@ -1,0 +1,52 @@
+groups:
+  - name: citadel-quantum-trader
+    rules:
+
+    # 1️⃣ Draw‑down > 5 % (critical – kill‑switch will fire)
+    - alert: DrawdownCritical
+      expr: drawdown_pct > 0.05
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Draw‑down > 5 % on bucket {{ $labels.bucket_id }}"
+        description: |
+          Current draw‑down: {{ printf "%.2f" $value }}%
+          The kill‑switch will pause new entries at 15 % draw‑down.
+          Investigate immediately.
+
+    # 2️⃣ Latency > 150 ms (warning)
+    - alert: LatencySpike
+      expr: histogram_quantile(0.95, rate(order_latency_seconds_bucket[5m])) > 0.15
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Latency > 150 ms (95th percentile)"
+        description: |
+          Average 95th‑percentile latency over the last 5 min: {{ printf "%.3f" $value }} s.
+          May indicate network congestion or broker overload.
+
+    # 3️⃣ Order‑rejection surge (>2 % of orders)
+    - alert: OrderRejectionSurge
+      expr: (increase(order_reject_total[5m]) / increase(order_total[5m])) > 0.02
+      for: 3m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Order rejection rate > 2 %"
+        description: |
+          Rejection rate: {{ printf "%.2f" $value }}%
+          Possible causes: insufficient margin, market closed, bad price.
+
+    # 4️⃣ Global risk‑budget approaching limit
+    - alert: GlobalRiskHigh
+      expr: global_risk_percentage > 0.04   # 80 % of the 5 % limit
+      for: 1m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Global risk budget > 80 % of limit"
+        description: |
+          Current utilization: {{ printf "%.2f" $value }}%
+          The controller will start throttling risk fractions.
