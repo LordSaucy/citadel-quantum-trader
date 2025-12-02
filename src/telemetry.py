@@ -55,3 +55,9 @@ LoggingInstrumentor().instrument(set_logging_format=True)
 # 6️⃣ Optional: instrument asyncio (adds context propagation for tasks)
 # -------------------------------------------------
 AsyncioInstrumentor().instrument()
+
+otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector:4317")
+otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+
+provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+
