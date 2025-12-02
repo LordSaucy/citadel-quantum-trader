@@ -33,6 +33,7 @@ import pytz
 from src.market_data_manager import MarketDataManager   # provides latest tick/depth
 from src.risk_management_layer import RiskManagementLayer
 from src.bot_control import BotControl                 # wrapper around pause/resume/kill‑switch
+from src.hmm_regime import HMMRegime
 
 # ---- NEW: import the guard classes ----------------
 from src.guards import (
@@ -64,6 +65,35 @@ order_price_slippage = Counter(
 
 # Assuming you have a global logger instance:
 LOGGER = TradeLogger()   # or however you obtain it in your code base
+
+# Somewhere in src/advanced_execution_engine.py (or any module that needs a regime)
+# ------------------------------------------------------------------
+# Initialise once at process start (e.g. in the global scope)
+# ------------------------------------------------------------------
+cfg = Config().settings
+regime_classifier = HMMRegime(cfg)
+
+# Try to load a pre‑trained model; if it fails we automatically fall back
+if not regime_classifier.load():
+    log.warning("Running with fallback regime detector (no HMM model)")
+
+# ------------------------------------------------------------------
+# Inside the signal‑processing loop
+# ------------------------------------------------------------------
+def process_bar(bar: dict):
+    # Assume `bar` already contains the engineered features required by the HMM
+    regime = regime_classifier.predict(bar)
+
+    # You can now use `regime` to gate the rest of the pipeline:
+    if regime == 2:          # high‑volatility regime → be extra cautious
+        risk_multiplier = 0.5
+    elif regime == 1:
+        risk_multiplier = 1.0
+    else:                    # low‑volatility regime
+        risk_multiplier = 1.5
+
+    # Pass `risk_multiplier` downstream to the position‑sizing logic
+    ...
 
     async def _pre_trade_guard(self, signal) -> bool:
         """
