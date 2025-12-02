@@ -46,3 +46,20 @@ guards:
 # -------------------------------------------------
 guards:
   # (as shown earlier)
+
+  # -----------------------------------------------------------------
+# Venues (ordered list – the engine will query them in this order)
+# -----------------------------------------------------------------
+venues:
+  - name: mt5_demo
+    type: mt5
+    vault_path: secret/data/citadel/brokers/mt5_demo
+  - name: ibkr_demo
+    type: ibkr
+    vault_path: secret/data/citadel/brokers/ibkr_demo
+
+# -----------------------------------------------------------------
+# Depth‑check parameters
+# -----------------------------------------------------------------
+min_depth_multiplier: 2.0   # required depth = multiplier × lot‑size
+
