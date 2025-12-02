@@ -13,3 +13,14 @@ class BrokerInterface(ABC):
         as long as you treat it consistently).
         """
         raise NotImplementedError
+
+ @abstractmethod
+    def send_order(self, **kwargs) -> dict:
+        """Send order to the *primary* broker. Returns a dict with at least:
+        {'order_id': <id>, 'timestamp': <epoch>, 'price': <price>}
+        """
+
+    @abstractmethod
+    def send_order_secondary(self, **kwargs) -> dict:
+        """Send order to the *secondary* broker. Same contract as send_order."""
+
