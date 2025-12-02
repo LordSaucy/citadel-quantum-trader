@@ -37,6 +37,7 @@ import MetaTrader5 as mt5
 import numpy as np
 import pandas as pd
 
+
 # ----------------------------------------------------------------------
 # Logging configuration (writes to ./logs/market_data.log)
 # ----------------------------------------------------------------------
@@ -511,4 +512,24 @@ if __name__ == "__main__":
     finally:
         # Clean up any lingering MT5 session (good practice)
         _shutdown_mt5()
+
+TIMEFRAMES = {
+    "H4": "240",   # minutes
+    "H1": "60",
+    "M15": "15"
+}
+
+def fetch_multi_tf(symbol: str, lookback: int = 500) -> dict[str, pd.DataFrame]:
+    """
+    Returns a dict:
+        {"H4": df_h4, "H1": df_h1, "M15": df_m15}
+    Each df has columns: ['timestamp','open','high','low','close','volume']
+    """
+    result = {}
+    for tf_name, minutes in TIMEFRAMES.items():
+        # Assuming you have a function that pulls candles for a given timeframe:
+        df = get_candles(symbol, timeframe_minutes=int(minutes), limit=lookback)
+        result[tf_name] = df
+    return result
+
 
