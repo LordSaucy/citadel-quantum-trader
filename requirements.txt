@@ -48,4 +48,8 @@ schedule==1.2.2                    # Simple in‑process scheduler (used by the 
 # included here because they are not required at runtime.  Keep them
 # in a separate `requirements-dev.txt` if you need them for local
 # testing or CI linting.
+
+matplotlib>=3.8
+seaborn>=0.13
+
 # -------------------------------------------------
