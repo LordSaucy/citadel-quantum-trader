@@ -50,3 +50,38 @@ groups:
         description: |
           Current utilization: {{ printf "%.2f" $value }}%
           The controller will start throttling risk fractions.
+
+groups:
+  - name: critical-alerts
+    interval: 1m
+    rules:
+
+    # -------------------------------------------------
+    # 1️⃣ Latency‑spike – avg latency > 0.25 s over 1 min
+    # -------------------------------------------------
+    - alert: HighOrderLatency
+      expr: avg_over_time(rate(order_latency_seconds_sum[1m]) / rate(order_latency_seconds_count[1m])[1m]) > 0.25
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "⚡️ Order latency > 250 ms (average over 1 min)"
+        description: |
+          The bot is experiencing high round‑trip latency.
+          Current avg latency: {{ $value | printf "%.3f" }} s.
+          Check network path to the MT5 broker, VPN health, or broker API throttling.
+
+    # -------------------------------------------------
+    # 2️⃣ Order‑rejection‑burst – > 2 % rejections over 5 min
+    # -------------------------------------------------
+    - alert: OrderRejectionBurst
+      expr: (rate(order_reject_total[5m]) / rate(order_total[5m])) > 0.02
+      for: 3m
+      labels:
+        severity: warning
+      annotations:
+        summary: "🚫 Order‑rejection rate > 2 % (5‑min window)"
+        description: |
+          The bot is being rejected by the broker too often.
+          Rejection rate: {{ $value | printf \"%.2%\" }}.
+          Investigate broker limits, depth checks, or slippage guards.
