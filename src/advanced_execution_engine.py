@@ -13,6 +13,14 @@ from .venue_manager import VenueManager
 from trade_logger import TradeLogger   # import the logger singleton or instantiate it
 from shock_detector import should_block_trade
 
+from .guard_helpers import (
+    check_depth,
+    check_latency,
+    check_spread,
+    check_volatility,
+)
+
+
 
 # -------------------------------------------------
 # advanced_execution_engine.py
@@ -56,6 +64,69 @@ order_price_slippage = Counter(
 
 # Assuming you have a global logger instance:
 LOGGER = TradeLogger()   # or however you obtain it in your code base
+
+    async def _pre_trade_guard(self, signal) -> bool:
+        """
+        Returns True if *all* safety checks pass.
+        `signal` contains at least: symbol, volume (positive for buy, negative for sell),
+        and any other fields you need for the guard (e.g., required_volume).
+        """
+        # 1️⃣ Depth / LIR
+        if not check_depth(self.broker,
+                           symbol=signal["symbol"],
+                           required_volume=abs(signal["volume"]),
+                           min_lir=0.5):
+            self.logger.warning("Trade skipped – depth/LIR guard")
+            return False
+
+        # 2️⃣ Latency
+        if not check_latency(self.broker, max_latency_sec=0.15):
+            self.logger.warning("Trade skipped – latency guard")
+            return False
+
+        # 3️⃣ Spread / slippage
+        if not check_spread(self.broker,
+                            symbol=signal["symbol"],
+                            max_spread_pips=0.5):
+            self.logger.warning("Trade skipped – spread guard")
+            return False
+
+        # 4️⃣ Volatility‑spike (ATR)
+        if not check_volatility(self.tech_calc,
+                                symbol=signal["symbol"],
+                                atr_multiplier=2.0,
+                                max_atr_pct=0.20):
+            self.logger.warning("Trade skipped – volatility‑spike guard")
+            return False
+
+        # All checks passed
+        return True
+
+    async def execute_trade(self, signal):
+        """
+        Entry point called by the signal engine.
+        """
+        # -----------------------------------------------------------------
+        # 0️⃣ Quick sanity: make sure the bot is not paused / kill‑switch
+        # -----------------------------------------------------------------
+        if self.state.is_paused or self.state.kill_switch_active:
+            self.logger.info("Bot paused / kill‑switch active – ignoring signal")
+            return
+
+        # -----------------------------------------------------------------
+        # 1️⃣ Run the predictive‑control guard
+        # -----------------------------------------------------------------
+        if not await self._pre_trade_guard(signal):
+            # Guard already logged the reason; we just return.
+            return
+
+        # -----------------------------------------------------------------
+        # 2️⃣ Normal execution path (size calc, risk check, send order)
+        # -----------------------------------------------------------------
+        stake = self.risk_manager.compute_stake(...)
+        # … existing order construction …
+        self.broker.send_order(...)
+
 
 def _check_liquidity(self, symbol, required_volume, side):
     depth = self.broker.get_market_depth(symbol, depth=30)
