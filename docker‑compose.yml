@@ -397,5 +397,52 @@ alertmanager:
       - backend
     restart: unless-stopped
 
+        # -------------------------------------------------
+    # Falco – runtime IDS (Docker side‑car)
+    # -------------------------------------------------
+    falco:
+      image: falco/falco:latest
+      container_name: citadel-falco
+      privileged: true                         # required for kernel event capture
+      network_mode: "host"                     # Falco needs host networking to see all syscalls
+      pid: "host"                              # share the host PID namespace
+      volumes:
+        - /var/run/docker.sock:/host/var/run/docker.sock:ro   # read Docker events
+        - /dev:/host/dev:ro                                 # needed for /proc access
+        - /proc:/host/proc:ro                               # needed for /proc access
+        - /boot:/host/boot:ro                               # needed for kernel headers
+        - /lib/modules:/host/lib/modules:ro                 # needed for kernel modules
+        - ./falco/rules/falco_rules.local.yaml:/etc/falco/falco_rules.local.yaml:ro
+      environment:
+        - FALCO_RULES_FILE=/etc/falco/falco_rules.local.yaml
+        - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}   # set in .env (see below)
+      command: >
+        /usr/bin/falco
+        -K /host
+        -r /etc/falco/falco_rules.yaml
+        -r /etc/falco/falco_rules.local.yaml
+        -o json_output=true
+        -o json_include_output_property=true
+        -o json_include_tags_property=true
+        -o json_include_rule_property=true
+        -o json_include_source_property=true
+        -o json_include_time_property=true
+        -o json_include_priority_property=true
+
+# -------------------------------------------------
+# Networks (if you need an isolated network for the stack)
+# -------------------------------------------------
+networks:
+  cqt-net:
+    driver: bridge
+
+# -------------------------------------------------
+# Volumes (persistent storage for services that need it)
+# -------------------------------------------------
+volumes:
+  pg_data: {}
+  prometheus_data: {}
+  grafana_data: {}
+  # Add any additional named volumes you require here
 
  
