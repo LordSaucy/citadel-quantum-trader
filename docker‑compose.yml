@@ -317,6 +317,9 @@ optimiser:
     - backend
   restart: unless-stopped
 
+  CMD ["sh", "-c", "while true; do python run_opt.py; sleep ${RUN_INTERVAL:-86400}; done"]
+
+
 
 
  
