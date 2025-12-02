@@ -89,47 +89,14 @@ receivers:
           *Value:* {{ .Value }}
           {{ end }}
 
-
-global:
-  resolve_timeout: 5m
-  # Default Slack webhook – can be overridden by env var
-  slack_api_url: '{{ env "SLACK_WEBHOOK_URL" }}'
-
-route:
-  receiver: slack-notifications
-  group_by: ['alertname', 'job']
-  group_wait: 30s
-  group_interval: 5m
-  repeat_interval: 1h
-
-  # Critical alerts also go to PagerDuty
-  routes:
-    - match:
-        severity: critical
-      receiver: pagerduty
-      continue: true   # also send to Slack
-
-receivers:
-  - name: slack-notifications
-    slack_configs:
-      - channel: '#trading-alerts'
-        send_resolved: true
-        title: "[{{ .Status }}] {{ .GroupLabels.alertname }}"
-        text: |
-          {{ range .Alerts }}
-          *Alert:* {{ .Annotations.summary }}
-          *Details:* {{ .Annotations.description }}
-          *Value:* {{ .Value }}
-          {{ end }}
-
-  - name: pagerduty
-    pagerduty_configs:
-      - service_key: '{{ env "PAGERDUTY_INTEGRATION_KEY" }}'
-        severity: '{{ .CommonLabels.severity }}'
-        send_resolved: true
-
-  - name: kill-switch
-    webhook_configs:
-      - url: 'http://bot-control:8000/api/v1/kill-switch'
-        send_resolved: false
- 
+alertmanager:
+  image: prom/alertmanager:latest
+  volumes:
+    - ./alertmanager/alertmanager.yml:/etc/alertmanager/config.yml:ro
+    - ./alertmanager/secrets:/etc/alertmanager/secrets:ro   # contains SLACK_WEBHOOK_URL, PAGERDUTY_INTEGRATION_KEY
+  environment:
+    - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+    - PAGERDUTY_INTEGRATION_KEY=${PAGERDUTY_INTEGRATION_KEY}
+  ports:
+    - "9093:9093"
+  restart: unless-stopped
