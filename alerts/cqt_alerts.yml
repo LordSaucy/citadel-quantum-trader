@@ -211,4 +211,15 @@ groups:
     annotations:
       summary: "Very high LIR ({{ $value }}) on bucket {{ $labels.bucket_id }}"
       description: "Market is heavily one‑sided; consider tightening risk‑fraction."
+groups:
+- name: correlation.rules
+  rules:
+  - alert: HighCorrelationRegime
+    expr: cqt_average_correlation > 0.65
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Average 30‑day correlation > 0.65"
+      description: "Risk caps have been automatically tightened. Review the risk‑fraction schedule if needed."
 
