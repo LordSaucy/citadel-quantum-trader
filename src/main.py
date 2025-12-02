@@ -167,5 +167,30 @@ def main():
         log.exception("💥 Unhandled exception – shutting down")
         # Optionally write a final checkpoint here as well
         raise
+def load_last_checkpoint(session):
+    row = session.execute(
+        "SELECT payload FROM bot_checkpoint ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        return None
+    data = row[0]   # JSONB column
+    # Re‑insert positions & pending orders into the DB tables
+    for pos in data["positions"]:
+        session.merge(Position(**pos))   # upsert
+    for po in data["pending_orders"]:
+        session.merge(PendingOrder(**po))
+    # Restore risk schedule if you store it in BotState
+    if data.get("risk_schedule"):
+        state = session.query(BotState).first()
+        state.risk_schedule_json = json.dumps(data["risk_schedule"])
+    session.commit()
+    log.info("✅ Restored %d positions and %d pending orders from checkpoint",
+             len(data["positions"]), len(data["pending_orders"]))
+
+# In main():
+register_graceful_shutdown()
+with get_session() as session:
+    load_last_checkpoint(session)
+# then start the normal bot loop
 
 
