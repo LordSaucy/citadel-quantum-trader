@@ -297,5 +297,26 @@ nginx-proxy:
       - backend
     restart: unless-stopped
 
+    # -------------------------------------------------
+# Optimiser – runs the GA (or CMA‑ES) on schedule
+# -------------------------------------------------
+optimiser:
+  image: citadel/optimiser:latest
+  container_name: citadel-optimiser
+  environment:
+    - TRAIN_DATA=/data/train.parquet
+    - VAL_DATA=/data/val.parquet
+    - OUT_CONFIG=/opt/config/new_config.yaml
+    - RUN_INTERVAL=86400          # seconds between runs (24 h). Set 0 for one‑off.
+  volumes:
+    - ./data:/data:ro               # historic data (read‑only)
+    - ./config:/opt/config:rw        # shared with the bot (hot‑reload)
+  depends_on:
+    - citadel-bot                   # ensures DB & broker are up
+  networks:
+    - backend
+  restart: unless-stopped
+
+
 
  
