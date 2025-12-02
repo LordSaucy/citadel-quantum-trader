@@ -94,6 +94,23 @@ class AdvancedExecutionEngine:
             secret=env("IBKR_SECRET", ""),
         )
 
+    if cfg.get("mode") == "arb_only":
+    # `arb_signal` is a dict with the three legs and the raw profit estimate
+    try:
+        await triangular_arb_executor.execute_triangular_arb(
+            broker=self.broker,
+            legs=arb_signal["legs"],
+            gross_profit_pips=arb_signal["gross_profit_pips"],
+        )
+        logger.info("✅ Triangular arb executed successfully")
+    except ArbExecutionError as exc:
+        logger.warning(f"⚠️ Arb aborted: {exc}")
+        # Optionally record a metric so you can see how often the guard fires
+        metrics.arb_guard_hits.inc()
+        # Continue with normal flow (skip this arb)
+        continue
+
+
     # ------------------------------------------------------------------
     def _choose_gateway(self, symbol: str) -> Any:
         """Very simple routing – you can make this smarter."""
