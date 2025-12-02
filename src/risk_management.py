@@ -1,6 +1,8 @@
 import time
 from datetime import datetime, timedelta
 from typing import Tuple, Optional
+from src.metrics import set_bucket_risk   # adjust import path if needed
+
 
 from .config import logger, env
 from prometheus_client import Gauge
