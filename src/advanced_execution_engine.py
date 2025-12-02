@@ -621,7 +621,7 @@ def compute_stake(bucket_id: int, equity: float, risk_modifier: float = 1.0):
     trade_idx = get_trade_counter(bucket_id) + 1
     f = RISK_SCHEDULE.get(trade_idx, RISK_SCHEDULE.get("default", 0.40))
     f *= risk_modifier   # <-- new line
-    stake = equity * f
+    stake = risk_manager.allocate_for_trade(bucket_id, symbol, equity, risk_frac)
     return stake 
 
 if cfg['risk_controls'].get('use_lir', False):
