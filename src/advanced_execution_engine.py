@@ -387,4 +387,5 @@ def on_order_filled(self, order_id, fill_price, fill_timestamp):
         )
         # … rest of the existing logic (record trade, update ledger, etc.) …
         return order
+        
 
