@@ -14,7 +14,8 @@ from trade_logger import TradeLogger   # import the logger singleton or instanti
 from shock_detector import should_block_trade
 from regime_ensemble import match_regime, current_regime_vector
 from garch_vol import forecast_vol   # you already have a GARCH helper
-
+import asyncio
+from src.telemetry import trace
 
 
 from .guard_helpers import (
@@ -633,3 +634,11 @@ if result.retcode == mt5.TRADE_RETCODE_DONE:
     pnl = (exit_price - entry_price) * volume * RR_target   # calculate profit in USD
     risk_manager.record_trade_result(bucket_id, pnl)
 
+async def execution_engine(execution_queue):
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_as_current_span("execution_engine"):
+        while True:
+            signal = await execution_queue.get()
+            with tracer.start_as_current_span("send_order"):
+                # Existing order‑submission code (MT5 API, etc.)
+                await send_order_to_broker(signal)
