@@ -96,5 +96,17 @@ broker:
   # If your broker gives a direct “margin per lot” value, set it here:
   # margin_per_lot: 1000          # $ required to open 1 lot
 
+monte_carlo_dd:
+  dd_threshold: 0.05          # 5 % draw‑down at 99.9 % percentile → kill‑switch
+  num_paths: 20000            # how many Monte‑Carlo paths per run
+  trades_per_path: 1000       # length of each simulated equity curve
+  win_rate_override: null     # optional static win‑rate (e.g., 0.997). If null, use live rolling win‑rate.
+  rr_target: 5.0              # reward‑to‑risk ratio (must match the bot config)
+  schedule:                    # you can embed the schedule here or read from the DB
+    1: 1.00
+    2: 1.00
+    3: 0.60
+    4: 0.50
+    default: 0.40
 
 
