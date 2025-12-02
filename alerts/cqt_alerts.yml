@@ -85,3 +85,27 @@ groups:
           The bot is being rejected by the broker too often.
           Rejection rate: {{ $value | printf \"%.2%\" }}.
           Investigate broker limits, depth checks, or slippage guards.
+
+          groups:
+  - name: critical-alerts
+    rules:
+      - alert: GlobalRiskExceeded
+        expr: global_risk_percentage > 4.5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Global risk budget > 4.5 %"
+          description: "Aggregated risk exposure is approaching the 5 % cap. The controller will auto‑scale down soon."
+          runbook: "https://github.com/yourorg/citadel-qt/blob/main/docs/runbook.md#global-risk-budget"
+
+      - alert: EdgeDecayTriggered
+        expr: increase(edge_decay_events_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Edge‑decay detector fired"
+          description: "Rolling win‑rate fell below the safety floor; risk fractions have been halved for affected buckets."
+          runbook: "https://github.com/yourorg/citadel-qt/blob/main/docs/runbook.md#edge-decay"
+
