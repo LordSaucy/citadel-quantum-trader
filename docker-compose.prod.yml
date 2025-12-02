@@ -1,0 +1,19 @@
+services:
+  citadel-bot:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/citadel/trader:${VERSION}
+    environment:
+      # Switch to the optimised config – default is false (old config)
+      USE_OPTIMISED_CFG: "true"
+    # Keep the same volumes, secrets, and network as the base file
+    volumes:
+      - ./vault/agent.hcl:/etc/vault/agent.hcl:ro
+      - vault-secrets:/run/secrets
+    # No change to entrypoint – the binary will hot‑reload the config
+    restart: unless-stopped
+
+networks:
+  internal:
+    external: true   # assume you already have a shared network
+
+volumes:
+  vault-secrets:
