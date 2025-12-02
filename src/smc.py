@@ -715,6 +715,24 @@ class SmartMoneyConceptsSystem:
             recommendation="Insufficient data for SMC analysis",
         )
 
+def refresh_params(self):
+        self.order_block_weight = get_param("order_block_weight", 0.7)
+        self.liquidity_sweep_weight = get_param("liquidity_sweep_weight", 0.6)
+        self.fair_value_gap_weight = get_param("fair_value_gap_weight", 0.5)
+        self.break_of_structure_weight = get_param("break_of_structure_weight", 0.6)
+        self.premium_discount_thresh = get_param("premium_discount_thresh", 0.02)
+        self.max_confluence_score = get_param("max_confluence_score", 0.95)
+
+    def score(self, market_state):
+        # Example usage
+        score = (
+            self.order_block_weight * market_state.order_block_signal +
+            self.liquidity_sweep_weight * market_state.liquidity_signal +
+            self.fair_value_gap_weight * market_state.fvg_signal +
+            self.break_of_structure_weight * market_state.bos_signal
+        )
+        # Clip to the max allowed confluence
+        return min(score, self.max_confluence_score)
 
 # ----------------------------------------------------------------------
 # Global singleton – import this from ``src/main.py`` and use it directly
