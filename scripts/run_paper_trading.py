@@ -224,3 +224,43 @@ def main() -> int:
         print("All metrics satisfied the production tolerances.")
         return 0
 
+# -------------------------------------------------
+# 11️⃣  PAPER‑TRADING GATE (48 h or 500 trades)
+# -------------------------------------------------
+paper-trading:
+  name: Paper‑Trading Gate
+  runs-on: ubuntu-latest
+  needs: [build]                     # wait until the Docker image is built
+  timeout-minutes: 1800              # 30 h max (covers 48 h + buffer)
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Docker
+      uses: docker/setup-buildx-action@v2
+
+    - name: Pull built image
+      run: |
+        docker pull ghcr.io/${{ github.repository_owner }}/citadel/trader:latest
+
+    - name: Start paper stack (detached)
+      run: |
+        docker compose -f docker-compose.yml -f docker-compose.paper.yml up -d
+
+    - name: Run paper‑trading monitor (48 h or 500 trades)
+      env:
+        LATENCY_TOLERANCE_SEC: "0.5"
+        REJECT_TOLERANCE: "0.01"
+        SLIPPAGE_TOLERANCE_PIPS: "0.5"
+      run: |
+        python scripts/run_paper_trading.py
+
+    - name: Collect artefacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: paper‑run‑artifacts
+        path: |
+          backtest_trades.csv
+          paper_summary.txt
+          metrics_snapshot.json
