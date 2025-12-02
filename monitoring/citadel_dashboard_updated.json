@@ -143,3 +143,21 @@
   "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
   "id": 104
 }
+{
+  "type": "logs",
+  "title": "Citadel Bot – Order Rejections",
+  "datasource": "Loki",
+  "targets": [
+    {
+      "expr": "{job=\"varlogs\", container=~\"citadel-bot.*\"} |= \"ORDER_REJECTED\"",
+      "refId": "A"
+    }
+  ],
+  "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+  "id": 99,
+  "options": {
+    "showTime": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending"
+  }
+}
