@@ -623,3 +623,9 @@ def compute_stake(bucket_id: int, equity: float, risk_modifier: float = 1.0):
     f *= risk_modifier   # <-- new line
     stake = equity * f
     return stake 
+
+if cfg['risk_controls'].get('use_lir', False):
+    if not depth_guard.check_lir(order_book):
+        logger.info("LIR guard rejected trade")
+        return RejectCode.LIQUIDITY_IMBALANCE
+
