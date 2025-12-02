@@ -1,0 +1,19 @@
+# grafana-provisioning/datasources/prometheus.yml
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy               # Grafana contacts Prometheus directly (no external proxy)
+    url: http://cqt-monitor.internal:9090   # internal VPC hostname + port
+    isDefault: true            # Makes this the default datasource for new panels
+    editable: false            # Prevents accidental edits via the UI
+    jsonData:
+      # Optional: set a custom time‑range for the UI “Explore” view
+      timeInterval: "15s"
+    # No authentication needed because the traffic stays inside the VPC.
+    # If you ever enable basic auth on Prometheus, add:
+    # basicAuth: true
+    # basicAuthUser: <username>
+    # secureJsonData:
+    #   basicAuthPassword: <password>
