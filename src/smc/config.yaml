@@ -1,0 +1,8 @@
+# config.yaml (or new_config.yaml) – add a new subsection
+smc_parameters:
+  order_block_weight: 0.73
+  liquidity_sweep_weight: 0.58
+  fair_value_gap_weight: 0.42
+  break_of_structure_weight: 0.66
+  premium_discount_thresh: 0.018
+  max_confluence_score: 0.92
