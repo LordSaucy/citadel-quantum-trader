@@ -11,3 +11,6 @@ def reload_config():
     # 3️⃣ Un‑pause after a short debounce
     time.sleep(0.5)               # give the engine a moment to settle
     signal_queue.resume()
+
+    use_shadow_mode: true   # when true, bot logs signals but never sends orders
+
