@@ -155,6 +155,8 @@ COPY src/guards/ ./src/guards/
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD curl -fSs http://localhost:8000/health || exit 1
 
+[project.scripts]
+cqt-ingest = "cqt.data_ingest.collector:run"
 
 
  
