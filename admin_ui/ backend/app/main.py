@@ -78,5 +78,16 @@ async def logs_endpoint(container_name: str,
 @app.get("/drawdown")
 async def drawdown(start: str = None, end: str = None,
                   user=Depends(get_current_user)):
+
+                      from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
+
+@app.get("/api/logs/{container_name}")
+async def sse_logs(container_name: str, user=Depends(get_current_user)):
+    async def event_generator():
+        async for line in _log_generator(container_name):
+            yield f"data: {line}\n\n"
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
     data = query_drawdown(start, end)
     return {"points": data}
