@@ -1,0 +1,41 @@
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+
+common:
+  path_prefix: /var/lib/loki
+  storage:
+    filesystem:
+      chunks_directory: /var/lib/loki/chunks
+      rules_directory: /var/lib/loki/rules
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v12
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /var/lib/loki/boltdb-shipper-active
+    cache_location: /var/lib/loki/boltdb-shipper-cache
+    shared_store: filesystem
+  filesystem:
+    directory: /var/lib/loki/chunks
+
+limits_config:
+  retention_period: 365d          # <‑‑ keep logs for a year (or longer)
+  # optional: increase per‑stream limits if you have high volume
+  # ingestion_rate_mb: 10
+  # max_streams_per_user: 10000
+
+chunk_target_size: 1048576        # 1 MiB (default)
+table_manager:
+  retention_deletes_enabled: true
+  retention_period: 365d
