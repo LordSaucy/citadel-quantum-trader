@@ -638,3 +638,73 @@ services:
     depends_on:
       - citadel-db
     restart: unless-stopped
+
+    services:
+  # -------------------------------------------------
+  # PostgreSQL (single instance, two schemas)
+  # -------------------------------------------------
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: citadel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: citadel
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "citadel"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # -------------------------------------------------
+  # Shared market‑feed writer (writes to a named pipe)
+  # -------------------------------------------------
+  feed:
+    image: citadel/trader:stable   # same image, we just run a different entrypoint
+    command: >
+      sh -c "mkfifo -m 666 /tmp/mt5_pipe &&
+             python /opt/citadel/feed_writer.py --pipe /tmp/mt5_pipe"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - pipe:/tmp   # shared volume for the FIFO
+
+  # -------------------------------------------------
+  # Control bot (baseline – e.g., no LIR)
+  # -------------------------------------------------
+  citadel-bot-ctrl:
+    image: citadel/trader:stable
+    environment:
+      EXPERIMENT: "BASELINE"
+      DB_SCHEMA: "public"
+      PIPE_PATH: "/tmp/mt5_pipe"
+    depends_on:
+      - feed
+    volumes:
+      - pipe:/tmp
+    command: >
+      sh -c "python /opt/citadel/main.py"
+
+  # -------------------------------------------------
+  # Variant bot (e.g., WITH_LIR)
+  # -------------------------------------------------
+  citadel-bot-exp:
+    image: citadel/trader:stable
+    environment:
+      EXPERIMENT: "WITH_LIR"
+      DB_SCHEMA: "exp"
+      PIPE_PATH: "/tmp/mt5_pipe"
+    depends_on:
+      - feed
+    volumes:
+      - pipe:/tmp
+    command: >
+      sh -c "python /opt/citadel/main.py"
+
+volumes:
+  pgdata:
+  pipe:
+
