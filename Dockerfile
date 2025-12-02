@@ -149,5 +149,12 @@ RUN pip install --upgrade pip && \
 # Add guard code
 COPY src/guards/ ./src/guards/
 
+# -------------------------------------------------
+# Health‑check – expects the bot to expose /health returning {"status":"ok"}
+# -------------------------------------------------
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -fSs http://localhost:8000/health || exit 1
+
+
 
  
