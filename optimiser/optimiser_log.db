@@ -15,3 +15,31 @@ duration_s
 REAL
 How long the run took.
 
+{
+  "type": "stat",
+  "title": "Latest Optimiser Fitness",
+  "datasource": "Prometheus",
+  "targets": [
+    {
+      "expr": "optimiser_last_fitness",
+      "legendFormat": "",
+      "refId": "A"
+    }
+  ],
+  "fieldConfig": {
+    "defaults": {
+      "unit": "none",
+      "decimals": 3,
+      "thresholds": {
+        "mode": "absolute",
+        "steps": [
+          { "value": null, "color": "green" },
+          { "value": 0.5, "color": "orange" },
+          { "value": 0.2, "color": "red" }
+        ]
+      }
+    }
+  }
+}
+
+
