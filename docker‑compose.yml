@@ -340,6 +340,13 @@ services:
     ports:
       - "9093:9093"
 
+alertmanager:
+  image: prom/alertmanager:latest
+  volumes:
+    - ./alertmanager.yml:/etc/alertmanager/config.yml:ro
+    - ./alertmanager_secrets:/etc/alertmanager/secrets:ro   # <-- new
+  environment:
+    - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
 
 
  
