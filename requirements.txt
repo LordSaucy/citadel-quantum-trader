@@ -74,3 +74,7 @@ safety==3.2.*
 # For MT5 sandbox (if you have a Docker image that mimics MT5)
 docker-compose==1.29.*      # used by integration tests
 
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.8   # optional – only needed for the plot flag
+
