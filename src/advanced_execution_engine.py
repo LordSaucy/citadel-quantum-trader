@@ -11,6 +11,25 @@ from volatility_breakout import is_expanding
 from data_fetcher import get_recent_history   # existing helper that returns a DataFrame
 
 
+# -------------------------------------------------
+# advanced_execution_engine.py
+# -------------------------------------------------
+import logging
+from datetime import datetime
+import pytz
+
+# Existing imports …
+from src.market_data_manager import MarketDataManager   # provides latest tick/depth
+from src.risk_management_layer import RiskManagementLayer
+from src.bot_control import BotControl                 # wrapper around pause/resume/kill‑switch
+
+# ---- NEW: import the guard classes ----------------
+from src.guards import (
+    SentimentGuard,
+    CalendarLockout,
+    VolatilityGuard,
+    ShockDetector,
+)
 
 # Initialise once (e.g., at bot start)
 risk_mgr = RiskManager(db=session)   # pass your DB/session object
@@ -51,6 +70,72 @@ def _watch_config(self):
         engine.refresh_params()
         last_mtime = mtime
 
+ def __init__(self, cfg, redis_client):
+        self.cfg = cfg
+        self.risk = RiskManagementLayer(cfg)
+        self.control = BotControl()               # expose pause/resume/kill
+        self.market = MarketDataManager(cfg)
+
+        # ---- instantiate each guard -----------------
+        self.sentiment_guard = SentimentGuard(cfg, redis_client)
+        self.calendar_lockout = CalendarLockout(cfg, __import__("economic_calendar"))
+        self.volatility_guard = VolatilityGuard(cfg)
+        self.shock_detector = ShockDetector(cfg)
+
+    # -------------------------------------------------
+    # Core method – called for every generated signal
+    # -------------------------------------------------
+    def process_signal(self, signal):
+        """
+        `signal` is the output of your 7‑lever SMC + regime engine.
+        It should contain at least:
+            - symbol, side (buy/sell), price, timestamp, quantity
+        """
+        # -----------------------------------------------------------------
+        # 1️⃣ Calendar lock‑out (high‑impact macro events)
+        # -----------------------------------------------------------------
+        if self.calendar_lockout.is_locked():
+            log.info("[Guard] Calendar lock‑out active – skipping signal")
+            return None   # signal discarded
+
+        # -----------------------------------------------------------------
+        # 2️⃣ News‑sentiment guard
+        # -----------------------------------------------------------------
+        if not self.sentiment_guard.check():
+            log.info("[Guard] Sentiment guard rejected signal")
+            return None
+
+        # -----------------------------------------------------------------
+        # 3️⃣ Volatility‑spike guard
+        # -----------------------------------------------------------------
+        # Assume you have a method that returns the latest ATR(14)
+        current_atr = self.market.get_atr(period=14)
+        if not self.volatility_guard.check(current_atr):
+            log.info("[Guard] Volatility spike – rejecting signal")
+            return None
+
+        # -----------------------------------------------------------------
+        # 4️⃣ Shock detector (spread, desync, liquidity)
+        # -----------------------------------------------------------------
+        snapshot = self.market.get_latest_snapshot()
+        if not self.shock_detector.check(snapshot):
+            log.info("[Guard] Shock detector rejected signal")
+            return None
+
+        # -----------------------------------------------------------------
+        # 5️⃣ If we made it here, the signal is “clean” – continue with
+        #    risk sizing, order creation, and broker submission.
+        # -----------------------------------------------------------------
+        stake = self.risk.compute_stake(signal)   # existing method
+        order = self.build_order(signal, stake)   # your existing logic
+
+        # Send to broker (MT5, IBKR, etc.)
+        result = self.broker.send_order(order)
+
+        # Record outcome, update ledger, emit Prometheus metrics…
+        self.handle_execution_result(result, signal)
+
+        return result
 
 
 class MT5Gateway:
