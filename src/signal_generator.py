@@ -6,6 +6,9 @@ import numpy as np
 from features import FEATURES, load_regime_weights
 from config_loader import Config   # a tiny wrapper that loads config.yaml
 from utils import standardize      # optional z‑score normalizerfrom .scorer import build_scorer
+from .regime_selector import RegimeSelector
+from .scorer import build_scorer
+
 
 cfg = Config().settings
 
@@ -81,4 +84,30 @@ class SignalEngine:
 
         return score_series
 
+class SignalGenerator:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        # 1️⃣ Load the regime selector
+        self.regime_sel = RegimeSelector(
+            model_path=Path('models/regime_classifier.pkl'),
+            feat_path=Path('models/regime_features.json')
+        )
+        # 2️⃣ Build three separate scorers (one per regime)
+        self.scorers = {}
+        for regime in ('trend','range','high_vol'):
+            # each regime can have its own weight file
+            weight_path = cfg['scorer'][f'{regime}_weights_path']
+            with open(weight_path) as f:
+                w = json.load(f)
+            self.scorers[regime] = LinearScorer(w)   # you could also use the ensemble here
+
+    def evaluate(self, bar_features: dict) -> float:
+        # Decide regime first
+        regime_id = self.regime_sel.predict(bar_features)
+        regime_map = {0: 'trend', 1: 'range', 2: 'high_vol'}
+        regime_name = regime_map[regime_id]
+
+        # Use the scorer that belongs to that regime
+        scorer = self.scorers[regime_name]
+        return scorer.score(bar_features)
 
