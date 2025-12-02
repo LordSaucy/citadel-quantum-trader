@@ -8,6 +8,8 @@ from .prometheus import query_drawdown
 import os
 from fastapi import Body
 from .triangular_arb_executor import execute_triangular_arb, ArbExecutionError
+from fastapi import APIRouter, Depends, HTTPException
+from src.bot_control import set_bucket_flag   # you’ll implement this helper
 
 
 app = FastAPI(title="Citadel Admin API", version="0.1.0")
@@ -132,5 +134,15 @@ async def run_manual_arb(
             status_code=422,
             detail=str(exc),
         )
+
+router = APIRouter(prefix="/admin")
+
+@router.post("/bucket/{bucket_id}/schedule")
+async def toggle_schedule(bucket_id: int, enabled: bool, user=Depends(get_current_user)):
+    """
+    Enable or disable the risk‑schedule for a specific bucket.
+    """
+    set_bucket_flag(bucket_id, enabled)   # writes to Redis or a DB table
+    return {"bucket_id": bucket_id, "schedule_enabled": enabled}
 
 
