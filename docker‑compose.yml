@@ -975,3 +975,16 @@ jaeger:
     - backend
   restart: unless-stopped
 
+otel-collector:
+  image: otel/opentelemetry-collector:0.103.0
+  container_name: citadel-otel-collector
+  command: ["--config=/etc/otel-collector-config.yaml"]
+  volumes:
+    - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+  ports:
+    - "9464:9464"   # Prometheus metrics endpoint
+  depends_on:
+    - jaeger
+  networks:
+    - backend
+  restart: unless-stopped
