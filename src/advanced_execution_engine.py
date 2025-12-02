@@ -88,6 +88,12 @@ def _check_liquidity(self, symbol, required_volume, side):
         return False
     return True
 
+# Example in the order‑placement flow
+if not self._check_liquidity(symbol, required_volume, side):
+    # The function already logged the loss; just skip the trade.
+    return  # early exit – trade is not sent to the broker
+
+
 
 cfg = Config().settings
 RR_TARGET = cfg.get("RR_target", 5.0)   # default 5 if missing
