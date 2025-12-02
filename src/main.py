@@ -2,6 +2,8 @@ import os
 from flask import Flask, jsonify
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
+from news_overlay import is_recent_high_impact
+
 from .config import logger, env
 from .risk_management import RiskManagementLayer
 from .ultimate_confluence_system import bp as confluence_bp, DEFAULT_WEIGHTS
@@ -192,5 +194,19 @@ register_graceful_shutdown()
 with get_session() as session:
     load_last_checkpoint(session)
 # then start the normal bot loop
+
+def generate_signal(bar, previous_bar):
+    # ... volatility breakout already passed ...
+
+    # Convert bar timestamp to epoch seconds (assuming bar['timestamp'] is datetime)
+    signal_ts = bar['timestamp'].timestamp()
+
+    if is_recent_high_impact(signal_ts):
+        logger.info("High‑impact news arrived <30 s before signal – discarding")
+        return None
+
+    # Continue with regime‑forecast, etc.
+    ...
+
 
 
