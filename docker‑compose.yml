@@ -97,6 +97,57 @@ services:
       timeout: 5s
       retries: 5
 
+services:
+  # -------------------------------------------------
+  # PostgreSQL – primary (with WAL archiving)
+  # -------------------------------------------------
+  citadel-db:
+    image: postgres:15
+    container_name: citadel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: citadel
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password   # already used elsewhere
+      POSTGRES_DB: citadel
+      # ---- NEW: enable logical WAL + archiving ----
+      POSTGRES_INITDB_ARGS: "--wal-level=logical"
+      # The following three are read by the entrypoint script and appended
+      # to postgresql.conf *before* the server starts.
+      PGARCHIVE_MODE: "on"
+      PGARCHIVE_COMMAND: "aws s3 cp %p s3://citadel-audit/wal/%f"
+      # (optional) keep a few extra segments locally
+      PG_WAL_KEEP_SEGMENTS: "64"
+    secrets:
+      - db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # ---- AWS credentials (choose ONE of the three methods) ----
+    # 1️⃣ Pass via env‑vars (good for dev / testing)
+    # environment:
+    #   AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+    #   AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+    #   AWS_DEFAULT_REGION: "us-east-1"
+    #
+    # 2️⃣ Mount a credentials file (safer for prod)
+    # volumes:
+    #   - ~/.aws:/root/.aws:ro
+    #
+    # 3️⃣ Use the instance/EKS IAM role (preferred in cloud)
+    #   – no extra env‑vars needed; just ensure the role has
+    #   s3:PutObject permission on bucket citadel-audit.
+    #
+    networks:
+      - backend
+
+# -----------------------------------------------------------------
+# Secrets (Docker‑secret for DB password – you already have this)
+# -----------------------------------------------------------------
+secrets:
+  db_password:
+    external: true
+
+volumes:
+
   # --------------------------------------------------------------
   # 3️⃣  Prometheus – metrics collector
   # --------------------------------------------------------------
