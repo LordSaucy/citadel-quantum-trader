@@ -79,3 +79,155 @@ jobs:
   run: |
     apt-get update && apt-get install -y libglib2.0-0 libgomp1 libpng-dev libfreetype6-dev
 
+    name: CI / CD
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.py'
+      - '**/requirements.txt'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [ main ]
+
+env:
+  # Docker image names (replace with your own registry)
+  BACKEND_IMG: ghcr.io/${{ github.repository }}/admin-backend
+  FRONTEND_IMG: ghcr.io/${{ github.repository }}/admin-frontend
+
+jobs:
+  # -------------------------------------------------
+  # 1️⃣ Lint + static security (ruff, bandit, safety)
+  # -------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run ruff (fast lint)
+        run: ruff check src tests
+      - name: Run bandit (security static analysis)
+        run: bandit -r src
+      - name: Run safety (dependency check)
+        run: safety check -r requirements.txt --full-report
+
+  # -------------------------------------------------
+  # 2️⃣ Type checking (mypy) – optional but nice
+  # -------------------------------------------------
+  types:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: mypy src tests
+
+  # -------------------------------------------------
+  # 3️⃣ Unit tests + coverage
+  # -------------------------------------------------
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: [lint, types]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test deps
+        run: pip install -r requirements.txt
+      - name: Run pytest with coverage
+        run: |
+          pytest -m unit --cov=src --cov-report=xml --cov-report=term
+      - name: Upload coverage to Codecov (or use built‑in badge)
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: true
+
+  # -------------------------------------------------
+  # 4️⃣ Integration / smoke test against MT5 sandbox
+  # -------------------------------------------------
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      # Spin up a minimal MT5 sandbox (replace with your image)
+      mt5:
+        image: citadel/mt5-demo:latest
+        ports:
+          - 8443:443   # expose HTTPS for the bot
+        env:
+          DEMO_ACCOUNT: "1"
+        options: >-
+          --health-cmd="curl -f https://localhost:443/health || exit 1"
+          --health-interval=5s
+          --health-timeout=2s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test deps
+        run: pip install -r requirements.txt
+      - name: Run integration tests
+        env:
+          MT5_SANDBOX_IMAGE: citadel/mt5-demo:latest
+        run: pytest -m integration
+
+  # -------------------------------------------------
+  # 5️⃣ Build Docker images (backend + frontend)
+  # -------------------------------------------------
+  build-images:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./admin_ui/backend
+          push: true
+          tags: ${{ env.BACKEND_IMG }}:latest
+      - name: Build & push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./admin_ui/frontend
+          push: true
+          tags: ${{ env.FRONTEND_IMG }}:latest
+
+  # -------------------------------------------------
+  # 6️⃣ Deploy (optional – only on main branch)
+  # -------------------------------------------------
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-images
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: SSH into VPS & pull new images
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/citadel
+            docker compose pull admin-backend admin-frontend
+            docker compose up -d
+ 
+
