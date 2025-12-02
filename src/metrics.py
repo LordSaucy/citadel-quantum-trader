@@ -98,3 +98,14 @@ depth_gauge = Gauge(
 )
 
 
+kill_switch_active = Gauge(
+    "kill_switch_active",
+    "1 when the kill‑switch is engaged, 0 otherwise",
+)
+
+# When the watchdog detects a latency breach, set it:
+def trigger_kill_switch():
+    kill_switch_active.set(1)
+    # … existing logic that pauses the bot …
+
+
