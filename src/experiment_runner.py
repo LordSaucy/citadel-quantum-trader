@@ -101,3 +101,32 @@ def run_one_experiment():
 
 if __name__ == '__main__':
     run_one_experiment()
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def make_plot(row: dict):
+    """Create a side‑by‑side bar chart for the most important KPIs."""
+    fig, ax = plt.subplots(figsize=(10, 4))
+    metrics = ['expectancy', 'sharpe', 'max_dd', 'win_rate']
+    ctrl_vals = [row[f'control_{m}'] for m in metrics]
+    exp_vals  = [row[f'variant_{m}']  for m in metrics]
+
+    x = np.arange(len(metrics))
+    width = 0.35
+    ax.bar(x - width/2, ctrl_vals, width, label='Control')
+    ax.bar(x + width/2, exp_vals,  width, label='Variant')
+    ax.set_xticks(x)
+    ax.set_xticklabels(['Exp.', 'Sharpe', 'Max‑DD', 'Win‑Rate'])
+    ax.set_ylabel('Metric value')
+    ax.set_title(f"{row['experiment']} – {row['timestamp'][:10]}")
+    ax.legend()
+    plt.tight_layout()
+
+    out_dir = pathlib.Path('experiment/results/plots')
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fname = out_dir / f"{row['timestamp'][:10]}_{row['experiment']}.png"
+    plt.savefig(fname)
+    plt.close()
+    print(f"Plot saved to {fname}")
+
