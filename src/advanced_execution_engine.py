@@ -6,6 +6,7 @@ from .risk_management import RiskManagementLayer
 from prometheus_client import Histogram, Counter
 from smc import SMCEngine
 engine = SMCEngine()          # created at start‑up
+from config_loader import Config
 
 
 # ----------------------------------------------------------------------
@@ -24,6 +25,16 @@ order_price_slippage = Counter(
     "Absolute price difference between submitted price and fill price (pips)",
     ["symbol", "side"],
 )
+
+cfg = Config().settings
+RR_TARGET = cfg.get("RR_target", 5.0)   # default 5 if missing
+
+def build_order(entry_price: float, risk_amount: float):
+    # risk_amount = 1 R (the amount you are willing to lose)
+    tp_price = entry_price + RR_TARGET * risk_amount
+    sl_price = entry_price - 1.0 * risk_amount   # 1 R loss
+    return {"tp": tp_price, "sl": sl_price}
+
 
 def _watch_config(self):
     # existing file‑watch loop …
