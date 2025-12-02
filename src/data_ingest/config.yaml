@@ -1,3 +1,5 @@
+import yaml, pathlib
+
 symbols:
   - EURUSD
   - GBPUSD
@@ -8,3 +10,9 @@ symbols:
 # optional: end_date:   "2024-12-31"
 # provider: "mt5"   # or "polygon", "dukascopy"
 # depth_snapshot: true   # whether to also pull market‑depth (order‑book) levels
+
+CFG_PATH = pathlib.Path(__file__).with_name("config.yaml")
+
+def load():
+    with open(CFG_PATH, "r") as f:
+        return yaml.safe_load(f)
