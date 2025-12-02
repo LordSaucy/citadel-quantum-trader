@@ -1003,3 +1003,19 @@ jaeger:
   networks:
     - backend
   restart: unless-stopped
+
+  # docker-compose.yml (add a new service)
+services:
+  data-ingest:
+    image: citadel/trader:latest   # same image that contains the code
+    command: ["cqt-ingest"]
+    environment:
+      - MT5_LOGIN=${MT5_LOGIN}          # injected via Vault Agent as before
+      - MT5_PASSWORD=${MT5_PASSWORD}
+    depends_on:
+      - vault
+    restart: "no"                         # run‑once per day
+    deploy:
+      restart_policy:
+        condition: none
+
