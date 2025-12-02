@@ -12,6 +12,9 @@ from data_fetcher import get_recent_history   # existing helper that returns a D
 
 
 
+# Initialise once (e.g., at bot start)
+risk_mgr = RiskManager(db=session)   # pass your DB/session object
+
 # ----------------------------------------------------------------------
 # Stubbed broker adapters – replace with real MT5 / IBKR SDK calls
 # ----------------------------------------------------------------------
@@ -48,6 +51,8 @@ def _watch_config(self):
         engine.refresh_params()
         last_mtime = mtime
 
+
+
 class MT5Gateway:
     def __init__(self, host: str, login: str, password: str):
         self.host = host
@@ -67,6 +72,15 @@ class IBKRGateway:
         self.api_key = api_key
         self.secret = secret
         logger.info("IBKRGateway configured for %s", host)
+
+    def can_enter_trade(equity, other_context):
+    # 1️⃣ Dynamic kill‑switch
+    if risk_mgr.check_dynamic_kill_switch(equity):
+        # Signal the higher‑level loop to pause new entries
+        return False
+
+    # 2️⃣ Existing checks (regime, volatility, etc.)
+    ...
 
     def send_order(self, symbol: str, side: str, qty: float, price: float) -> bool:
         logger.debug("IBKR order %s %s %.4f @ %.5f", side, symbol, qty, price)
