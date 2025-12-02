@@ -7,6 +7,8 @@ from sqlalchemy import select, func
 from prometheus_client import Counter, Gauge
 import requests
 import os
+from prometheus_api_client import PrometheusConnect
+
 
 log = logging.getLogger("edge_decay")
 log.setLevel(logging.INFO)
@@ -182,3 +184,21 @@ class EdgeDecayDetector(threading.Thread):
             if total == 0:
                 return 0.0
             return float(wins) / float(total)
+
+            pc = PrometheusConnect(url="http://prometheus:9090", disable_ssl=True)
+
+def high_drift_present() -> bool:
+    # If any feature PSI > 0.25 in the last 5 minutes → True
+    query = "max_over_time(feature_psi_*[5m]) > 0.25"
+    result = pc.custom_query(query=query)
+    return bool(result)   # non‑empty list means at least one feature crossed
+
+def maybe_trigger_decay():
+    if high_drift_present():
+        # Immediately tighten the risk schedule (e.g., set all future
+        # risk fractions to the minimum allowed value)
+        log.warning("⚠️ High feature drift detected – tightening risk schedule")
+        # You can call the same function that the win‑rate floor uses,
+        # or directly set a global flag that the RiskManagementLayer reads.
+        set_global_risk_multiplier(0.5)   # example: halve all risk fractions
+
