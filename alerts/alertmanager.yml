@@ -100,3 +100,72 @@ alertmanager:
   ports:
     - "9093:9093"
   restart: unless-stopped
+
+groups:
+  - name: citadel-guards
+    rules:
+      # -------------------------------------------------
+      # Sentiment Guard – reject too‑biased news
+      # -------------------------------------------------
+      - alert: SentimentGuardReject
+        expr: sentiment_guard_hits_total > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "News‑sentiment guard rejected a trade"
+          description: "Sentiment score exceeded configured thresholds ({{ $labels.reason }})"
+
+      # -------------------------------------------------
+      # Calendar Lock‑out – high‑impact macro window active
+      # -------------------------------------------------
+      - alert: CalendarLockoutActive
+        expr: calendar_lockout_active == 1
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "Calendar lock‑out is active"
+          description: "A high‑impact macro event (e.g., CPI, FOMC) is within the configured margin."
+
+      # -------------------------------------------------
+      # Volatility Spike Guard
+      # -------------------------------------------------
+      - alert: VolatilitySpikeDetected
+        expr: volatility_spike_guard_hits_total > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Volatility spike guard rejected a trade"
+          description: "Current ATR exceeded {{ $labels.atrs }} × baseline."
+
+      # -------------------------------------------------
+      # Shock Detector – spread, desync, liquidity
+      # -------------------------------------------------
+      - alert: ShockDetectorSpread
+        expr: shock_detector_hits_total{type="spread"} > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spread explosion detected"
+          description: "Current spread > {{ $labels.multiplier }} × average spread."
+
+      - alert: ShockDetectorDesync
+        expr: shock_detector_hits_total{type="desync"} > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Quote desync detected"
+          description: "Market data timestamp older than allowed latency."
+
+      - alert: ShockDetectorLiquidity
+        expr: shock_detector_hits_total{type="liquidity"} > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Liquidity vacuum detected"
+          description: "LIR > {{ $labels.threshold }} or depth below {{ $labels.min_depth }}."
