@@ -477,3 +477,33 @@ class TradeLogger:
         }
         self._store_entry(entry)   # same Merkle‑hash pipeline as other events
 
+ -------------------------------------------------
+# 1️⃣ Prometheus gauges for streaks (per bucket)
+# -------------------------------------------------
+streak_wins = Gauge(
+    "bucket_streak_wins",
+    "Current consecutive winning trades for a bucket",
+    ["bucket_id"]
+)
+
+streak_losses = Gauge(
+    "bucket_streak_losses",
+    "Current consecutive losing trades for a bucket",
+    ["bucket_id"]
+)
+
+# -------------------------------------------------
+# 2️⃣ Helper to update the gauges
+# -------------------------------------------------
+def _update_streak(bucket_id: int, is_win: bool):
+    # Retrieve the current values from the gauge (Prometheus client keeps them in memory)
+    cur_win = streak_wins.labels(bucket_id=bucket_id)._value.get()
+    cur_loss = streak_losses.labels(bucket_id=bucket_id)._value.get()
+
+    if is_win:
+        streak_wins.labels(bucket_id=bucket_id).set((cur_win or 0) + 1)
+        streak_losses.labels(bucket_id=bucket_id).set(0)          # reset loss streak
+    else:
+        streak_losses.labels(bucket_id=bucket_id).set((cur_loss or 0) + 1)
+        streak_wins.labels(bucket_id=bucket_id).set(0)            # reset win streak
+
