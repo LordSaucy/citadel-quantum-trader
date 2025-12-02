@@ -497,3 +497,24 @@ def build_broker_adapter():
     else:
         log.info("🚀 Starting in PRODUCTION mode")
         return MT5Adapter(paper_mode=False)
+
+import os
+import logging
+
+log = logging.getLogger(__name__)
+
+def build_execution_engine():
+    # -----------------------------------------------------------------
+    # Detect Shadow‑Mode
+    # -----------------------------------------------------------------
+    shadow_mode = os.getenv("SHADOW_MODE", "false").lower() == "true"
+    if shadow_mode:
+        log.info("🕶️  Starting in SHADOW‑MODE – orders will be logged, not sent")
+    else:
+        log.info("🚀  Starting in LIVE‑MODE – orders will be sent to broker")
+
+    # Pass the flag down to the engine/adapter
+    from .advanced_execution_engine import AdvancedExecutionEngine
+    return AdvancedExecutionEngine(shadow_mode=shadow_mode)
+
+
