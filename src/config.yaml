@@ -85,3 +85,16 @@ risk_shocks:
 
   # Edge‑decay – win‑rate floor (already exists, but we expose it here)
   winrate_floor: 0.95
+
+  # -------------------------------------------------
+# Broker‑specific margin parameters (optional overrides)
+# -------------------------------------------------
+broker:
+  contract_notional: 100000      # $ per standard lot (e.g., 1 lot = $100k)
+  max_leverage: 100              # broker‑declared max leverage (e.g., 1:100)
+  margin_factor: 0.01            # 1 % of notional per 1:100 leverage (derived from above)
+  # If your broker gives a direct “margin per lot” value, set it here:
+  # margin_per_lot: 1000          # $ required to open 1 lot
+
+
+
