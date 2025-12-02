@@ -7,6 +7,10 @@ from pathlib import Path
 import pytest
 import requests
 from dotenv import load_dotenv
+import pytest
+import docker
+import time
+import os
 
 # ----------------------------------------------------------------------
 # Load .env (non‑secret defaults) so tests can see things like DB host,
@@ -84,3 +88,42 @@ def sample_trade():
         "entry_price": 1.0800,
         "qty": 0.01,
     }
+
+@pytest.fixture(scope="session")
+def docker_client():
+    """Return a Docker client that talks to the host Docker daemon."""
+    return docker.from_env()
+
+@pytest.fixture(scope="session")
+def mt5_sandbox(docker_client):
+    """
+    Spin up a sandbox MT5 demo container (you must have an image that
+    pretends to be an MT5 broker – e.g., `citadel/mt5-demo`).
+    The fixture yields the container object and tears it down afterwards.
+    """
+    image = os.getenv("MT5_SANDBOX_IMAGE", "citadel/mt5-demo:latest")
+    container = docker_client.containers.run(
+        image,
+        detach=True,
+        ports={"443/tcp": None},   # expose a random host port
+        environment={"DEMO_ACCOUNT": "1"},
+    )
+    # Wait for the service to be ready (simple health‑check loop)
+    host_port = container.attrs["NetworkSettings"]["Ports"]["443/tcp"][0]["HostPort"]
+    health_url = f"https://localhost:{host_port}/health"
+    for _ in range(30):
+        try:
+            import urllib3
+            http = urllib3.PoolManager(cert_reqs='CERT_NONE')
+            resp = http.request("GET", health_url, timeout=2.0)
+            if resp.status == 200:
+                break
+        except Exception:
+            pass
+        time.sleep(1)
+    else:
+        pytest.fail("MT5 sandbox never became healthy")
+    yield container, host_port
+    container.stop()
+    container.remove()
+
