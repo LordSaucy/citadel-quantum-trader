@@ -151,3 +151,21 @@ if __name__ == "__main__":
     start_config_watcher()
     # … start the bot …
 
+from .shutdown import register_graceful_shutdown
+import logging
+
+log = logging.getLogger("citadel.main")
+
+def main():
+    register_graceful_shutdown()   # <‑‑ add this line **before** you start any threads / async loops
+    log.info("🚀 Citadel Quantum Trader starting …")
+    # … existing initialization (DB, broker connection, scheduler, etc.) …
+    try:
+        # Your existing run‑loop (could be asyncio.run(main_async()))
+        run_bot()
+    except Exception as exc:
+        log.exception("💥 Unhandled exception – shutting down")
+        # Optionally write a final checkpoint here as well
+        raise
+
+
