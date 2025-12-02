@@ -1,0 +1,23 @@
+version: "3.9"
+services:
+  # Re‑use the same config loader, but mount a test‑only config.yaml
+  admin-backend:
+    image: ghcr.io/yourorg/citadel-qt/admin-backend:latest
+    environment:
+      - ADMIN_JWT_SECRET=test-secret
+    volumes:
+      - ./tests/integration/config_test.yaml:/app/config/config.yaml:ro
+    depends_on:
+      - dummy-broker
+    networks:
+      - backend
+
+  dummy-broker:
+    build:
+      context: ./tests/integration/dummy_broker
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
