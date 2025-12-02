@@ -6,6 +6,195 @@ from deap import base, creator, tools, algorithms
 from config_loader import Config
 from backtest_validator import BacktestValidator   # your existing validator
 from prometheus_client import Gauge, Counter, start_http_server
+import argparse, json, os, sys, time
+from pathlib import Path
+from fitness import fitness
+import numpy as np
+from datetime import datetime
+
+# -----------------------------------------------------------------
+# Helper: convert a flat list of numbers into the dict expected by fitness()
+# -----------------------------------------------------------------
+def decode_individual(ind, param_schema):
+    """
+    ind – list of floats produced by the optimiser
+    param_schema – ordered list of (name, bounds, type) tuples
+    Returns a dict compatible with fitness().
+    """
+    cfg = {}
+    idx = 0
+    for name, bounds, kind in param_schema:
+        if kind == "list":                     # e.g., risk_schedule (fixed length)
+            length = bounds[2]                 # third element stores length
+            cfg[name] = ind[idx:idx+length]
+            idx += length
+        else:
+            cfg[name] = ind[idx]
+            idx += 1
+    return cfg
+
+# -----------------------------------------------------------------
+# Define the optimisation search space
+# -----------------------------------------------------------------
+# (name, (lower, upper, optional_extra), kind)
+#   kind = "float"  → single scalar
+#   kind = "list"   → a fixed‑length list of floats
+PARAM_SCHEMA = [
+    ("smc_weights", (0.0, 2.0, 7), "list"),          # 7 lever weights
+    ("risk_schedule", (0.0, 1.0, 7), "list"),        # 7 risk‑fractions (first 2 = 1.0)
+    ("rr_target", (3.0, 7.0, None), "float"),       # 5 : 1 is typical
+    ("win_rate_target", (0.95, 0.999, None), "float"),
+    ("max_drawdown", (0.05, 0.20, None), "float"),
+]
+
+# Flatten the bounds for the optimiser
+LOWER = []
+UPPER = []
+for _, (lo, hi, extra), _ in PARAM_SCHEMA:
+    if extra is None:          # scalar
+        LOWER.append(lo)
+        UPPER.append(hi)
+    else:                      # list – repeat bounds for each element
+        for _ in range(extra):
+            LOWER.append(lo)
+            UPPER.append(hi)
+
+LOWER = np.array(LOWER)
+UPPER = np.array(UPPER)
+
+# -----------------------------------------------------------------
+# Parse CLI args
+# -----------------------------------------------------------------
+parser = argparse.ArgumentParser(description="Weekly CQT optimiser")
+parser.add_argument("--method", choices=["deap","cmaes"], default="cmaes")
+parser.add_argument("--data-dir", default="../backend/data")
+parser.add_argument("--generations", type=int, default=30)
+parser.add_argument("--popsize", type=int, default=30)
+parser.add_argument("--seed", type=int, default=int(time.time()))
+args = parser.parse_args()
+
+np.random.seed(args.seed)
+
+# -----------------------------------------------------------------
+# 1️⃣  CMA‑ES implementation (fast for continuous spaces)
+# -----------------------------------------------------------------
+if args.method == "cmaes":
+    import cma
+
+    # Initial guess = middle of the bounds
+    x0 = (LOWER + UPPER) / 2.0
+    sigma0 = 0.3 * (UPPER - LOWER)   # initial step size
+
+    es = cma.CMAEvolutionStrategy(x0.tolist(), sigma0.tolist(),
+                                  {'bounds': [LOWER.tolist(), UPPER.tolist()],
+                                   'popsize': args.popsize,
+                                   'seed': args.seed,
+                                   'verb_disp': 0})   # silence verbose output
+
+    best_score = -np.inf
+    best_params = None
+
+    for gen in range(args.generations):
+        solutions = es.ask()
+        fitness_vals = []
+        for sol in solutions:
+            param_dict = decode_individual(sol, PARAM_SCHEMA)
+            score = fitness(param_dict, args.data_dir)
+            fitness_vals.append(-score)          # CMA‑ES minimises → negate
+        es.tell(solutions, fitness_vals)
+
+        # Keep track of the best (largest) score we have seen
+        gen_best_idx = np.argmin(fitness_vals)   # because we negated
+        gen_best_score = -fitness_vals[gen_best_idx]
+        if gen_best_score > best_score:
+            best_score = gen_best_score
+            best_params = decode_individual(solutions[gen_best_idx], PARAM_SCHEMA)
+
+        print(f"[Gen {gen+1:02d}] best fitness = {best_score:.4f}")
+
+    # -----------------------------------------------------------------
+    # 2️⃣  Write the winning config to new_config.yaml
+    # -----------------------------------------------------------------
+    out_path = Path("../config/new_config.yaml")
+    out_cfg = {
+        "smc_weights": best_params["smc_weights"],
+        "risk_schedule": {
+            1: best_params["risk_schedule"][0],
+            2: best_params["risk_schedule"][1],
+            3: best_params["risk_schedule"][2],
+            4: best_params["risk_schedule"][3],
+            5: best_params["risk_schedule"][4],
+            6: best_params["risk_schedule"][5],
+            7: best_params["risk_schedule"][6],
+        },
+        "RR_target": best_params["rr_target"],
+        "win_rate_target": best_params["win_rate_target"],
+        "max_drawdown": best_params["max_drawdown"],
+        # Preserve everything else from the current config:
+        # (you can merge with the existing file if you like)
+    }
+
+    out_path.write_text(json.dumps(out_cfg, indent=2))
+    print(f"\n✅ Optimiser finished – best score {best_score:.4f}")
+    print(f"📝 New config written to {out_path}")
+elif args.method == "deap":
+    # -------------------------------------------------
+    # DEAP GA setup (already partially defined above)
+    # -------------------------------------------------
+    from deap import algorithms
+
+    # Statistics collector – useful for debugging / logging
+    stats = tools.Statistics(lambda ind: ind.fitness.values)
+    stats.register("avg",   np.mean)
+    stats.register("std",   np.std)
+    stats.register("min",   np.min)
+    stats.register("max",   np.max)
+
+    # Run the evolutionary loop
+    pop, logbook = algorithms.eaSimple(population=pop,
+                                        toolbox=toolbox,
+                                        cxpb=0.7,          # crossover probability
+                                        mutpb=0.2,         # mutation probability
+                                        ngen=args.generations,
+                                        stats=stats,
+                                        halloffame=hof,
+                                        verbose=False)
+
+    # -------------------------------------------------
+    # Extract the best individual from the Hall‑of‑Fame
+    # -------------------------------------------------
+    best_ind = hof[0]
+    best_score = best_ind.fitness.values[0]
+    best_params = decode_individual(best_ind, PARAM_SCHEMA)
+
+    print("\n=== DEAP RESULT ===")
+    print(f"Best fitness: {best_score:.4f}")
+    print(f"Best individual: {best_params}")
+
+    # -------------------------------------------------
+    # Write the winning configuration to new_config.yaml
+    # -------------------------------------------------
+    out_path = Path("../config/new_config.yaml")
+    out_cfg = {
+        "smc_weights": best_params["smc_weights"],
+        "risk_schedule": {
+            1: best_params["risk_schedule"][0],
+            2: best_params["risk_schedule"][1],
+            3: best_params["risk_schedule"][2],
+            4: best_params["risk_schedule"][3],
+            5: best_params["risk_schedule"][4],
+            6: best_params["risk_schedule"][5],
+            7: best_params["risk_schedule"][6],
+        },
+        "RR_target": best_params["rr_target"],
+        "win_rate_target": best_params["win_rate_target"],
+        "max_drawdown": best_params["max_drawdown"],
+    }
+
+    out_path.write_text(json.dumps(out_cfg, indent=2))
+    print(f"\n✅ Optimiser finished – best score {best_score:.4f}")
+    print(f"📝 New config written to {out_path}")
+
 
 
 
