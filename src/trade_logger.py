@@ -511,3 +511,19 @@ def _update_streak(bucket_id: int, is_win: bool):
         streak_losses.labels(bucket_id=bucket_id).set((cur_loss or 0) + 1)
         streak_wins.labels(bucket_id=bucket_id).set(0)            # reset win streak
 
+
+    def log_synthetic_loss(self, bucket_id: int, symbol: str, volume: float,
+                           reason: str = "Insufficient depth"):
+        """Record a loss that resulted from a depth‑guard abort."""
+        loss_entry = {
+            "event": "synthetic_loss",
+            "bucket_id": bucket_id,
+            "symbol": symbol,
+            "volume": volume,
+            "reason": reason,
+            "pnl": -1.0,                 # 1 R loss (you can scale if you prefer)
+            "ts": datetime.utcnow().isoformat(),
+        }
+        self._store_entry(loss_entry)
+
+
