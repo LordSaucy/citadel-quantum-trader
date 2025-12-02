@@ -231,3 +231,23 @@ risk_schedule_defensive:
   4: 0.25
   5: 0.20
   # … 
+
+  # -------------------- Feature parameters --------------------
+features:
+  atr_stop:
+    k_range: [1.0, 2.5]          # optimiser will search inside this range
+    period: 14
+  vwap_bias:
+    window_minutes: 30
+  fractal_swings:
+    lookback: 10                 # number of bars to consider for fractal detection
+  time_of_day_decay:
+    london_peak_start: "08:00"    # EST
+    london_peak_end:   "12:00"
+  regime_weights:
+    trend:   "weights_trend.json"
+    range:   "weights_range.json"
+    high_vol:"weights_highvol.json"
+  order_flow_delta:
+    lookback_ticks: 200
+
