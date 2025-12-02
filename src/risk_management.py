@@ -321,3 +321,66 @@ def get_risk_fraction(bucket_id: int, conn) -> float:
         return float(row[0])
     # fallback to schedule dict if meta missing
     return RISK_SCHEDULE.get(bucket_id, RISK_SCHEDULE.get("default", 0.40))
+
+def _get_base_fraction(bucket_id: int, conn) -> float:
+    """
+    Returns the base risk fraction for the bucket:
+    1️⃣ First look in bucket_meta (global‑risk controller updates)
+    2️⃣ Fall back to the static schedule dict
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT risk_fraction FROM bucket_meta WHERE bucket_id = %s",
+        (bucket_id,),
+    )
+    row = cur.fetchone()
+    if row:
+        return float(row[0])
+
+    # static schedule fallback (same logic you already have)
+    trade_idx = get_trade_counter(bucket_id) + 1
+    if trade_idx in cfg["risk_schedule"]:
+        return cfg["risk_schedule"][trade_idx]
+    return cfg["risk_schedule"].get("default", 0.40)
+
+
+def _apply_edge_modifier(bucket_id: int, conn, base_fraction: float) -> float:
+    """
+    If a temporary edge‑decay row exists, apply its multiplier
+    and decrement the remaining‑trades counter.
+    When the counter reaches 0 the row is deleted.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT multiplier, remaining_trades
+        FROM risk_modifier
+        WHERE bucket_id = %s
+        FOR UPDATE
+        """,
+        (bucket_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return base_fraction
+
+    multiplier, remaining = row
+    new_fraction = base_fraction * multiplier
+
+    # Decrement the counter
+    if remaining <= 1:
+        cur.execute(
+            "DELETE FROM risk_modifier WHERE bucket_id = %s", (bucket_id,)
+        )
+    else:
+        cur.execute(
+            """
+            UPDATE risk_modifier
+            SET remaining_trades = remaining_trades - 1
+            WHERE bucket_id = %s
+            """,
+            (bucket_id,),
+        )
+    conn.commit()
+    return new_fraction
+
