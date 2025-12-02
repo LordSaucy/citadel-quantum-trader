@@ -251,5 +251,8 @@ nginx-proxy:
   networks:
     - backend
   restart: unless-stopped
- 
+ citadel-bot:
+  ...
+  volumes:
+    - ./heatmaps:/tmp/heatmaps   # host folder ./heatmaps maps to container /tmp/heatmaps
  
