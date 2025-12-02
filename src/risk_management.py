@@ -11,7 +11,9 @@ import datetime
 from sqlalchemy import select, update, insert, delete
 from src.edge_decay_detector import EdgeDecayDetector  # forward reference (optional)
 from redis import Redis
-
+import math
+from config_loader import Config
+from prometheus_client import Gauge
 
 
 log = logging.getLogger("citadel_bot")
@@ -431,3 +433,102 @@ def _apply_edge_modifier(bucket_id: int, conn, base_fraction: float) -> float:
 def log_depth_check(self, **kwargs):
     from .trade_logger import TradeLogger
     TradeLogger().log_depth_check(**kwargs)
+
+# -------------------------------------------------
+# New Prometheus gauge – shows the *effective* leverage
+# -------------------------------------------------
+effective_leverage_gauge = Gauge(
+    "effective_leverage",
+    "Leverage implied by the current lot size (1 = 1:1, 100 = 1:100)",
+    ["bucket_id"]
+)
+
+# -------------------------------------------------
+# Helper: compute the *maximum* lot size that satisfies
+# the broker’s margin requirement given current equity.
+# -------------------------------------------------
+def max_lot_by_margin(equity: float, risk_frac: float, cfg: dict) -> float:
+    """
+    equity      – current bucket equity (USD)
+    risk_frac   – fraction of equity we are willing to risk on the trade
+    cfg         – full config dict (contains broker params)
+    Returns the largest lot size (in broker lot units) that can be opened
+    without violating the broker’s margin rule.
+    """
+    # 1️⃣ Desired risk amount (the “R” we are willing to lose)
+    risk_amount = equity * risk_frac          # $ at risk
+
+    # 2️⃣ Broker parameters
+    contract_notional = cfg.get("broker", {}).get("contract_notional", 100_000)
+    max_leverage      = cfg.get("broker", {}).get("max_leverage", 100)
+    margin_factor     = cfg.get("broker", {}).get("margin_factor", 1.0 / max_leverage)
+
+    # 3️⃣ Margin required for ONE LOT at the *desired* risk amount:
+    #    margin_per_lot = contract_notional * margin_factor
+    margin_per_lot = contract_notional * margin_factor
+
+    # 4️⃣ Maximum lot we can afford with the *available* equity:
+    #    available_margin = equity - (equity - risk_amount)   <-- we keep the rest as reserve
+    #    But a simpler safe bound is: we cannot allocate more margin than the
+    #    *risk amount* itself (otherwise we would be risking > risk_frac).
+    #    So we cap the lot by the smaller of:
+    #       a) risk_amount / (contract_notional * risk_frac)   (the “risk‑based” lot)
+    #       b) equity / margin_per_lot                        (the “margin‑based” lot)
+    #
+    #    The formula below does exactly that.
+    lot_by_risk   = risk_amount / (contract_notional * risk_frac)   # = 1.0 normally
+    lot_by_margin = equity / margin_per_lot
+
+    # Choose the stricter (smaller) lot size
+    max_lot = min(lot_by_risk, lot_by_margin)
+
+    # Ensure we never exceed the broker’s hard max_lot (if defined)
+    broker_max_lot = cfg.get("broker_max_lot", float("inf"))
+    max_lot = min(max_lot, broker_max_lot)
+
+    # Return a *float* – the caller will later round to the broker’s step size
+    return max_lot
+
+
+# -------------------------------------------------
+# Update compute_stake() to use the dynamic lot size
+# -------------------------------------------------
+def compute_stake(bucket_id: int, equity: float) -> float:
+    """
+    Returns the *dollar* amount to risk on the next trade.
+    This function now:
+    1️⃣ Reads the configured risk_fraction (schedule or default)
+    2️⃣ Calculates the *maximum* lot allowed by margin
+    3️⃣ If the requested lot (equity * f / contract_notional) exceeds that,
+       we *scale down* the risk_fraction so the lot fits.
+    4️⃣ Emits the effective leverage as a Prometheus gauge.
+    """
+    # ----- 1️⃣ Get the schedule fraction -----
+    trade_idx = get_trade_counter(bucket_id) + 1
+    f = RISK_SCHEDULE.get(trade_idx, RISK_SCHEDULE.get("default", 0.40))
+
+    # ----- 2️⃣ Compute the lot we *want* to trade -----
+    desired_lot = (equity * f) / cfg["contract_notional"]
+
+    # ----- 3️⃣ Compute the broker‑allowed max lot -----
+    max_allowed_lot = max_lot_by_margin(equity, f, cfg)
+
+    # ----- 4️⃣ If we exceed, scale down the fraction -----
+    if desired_lot > max_allowed_lot:
+        # Scale the risk fraction proportionally so the lot fits exactly
+        scaling = max_allowed_lot / desired_lot
+        f = f * scaling
+        # Re‑compute the stake with the scaled fraction
+        stake = equity * f
+    else:
+        stake = equity * f
+
+    # ----- 5️⃣ Record effective leverage for monitoring -----
+    # Effective leverage = (lot * contract_notional) / stake
+    # (how many times the risk amount is amplified by the position size)
+    effective_leverage = (desired_lot * cfg["contract_notional"]) / (equity * f)
+    effective_leverage_gauge.labels(bucket_id=str(bucket_id)).set(effective_leverage)
+
+    # ----- 6️⃣ Return the *dollar* stake (the broker will convert to lot) -----
+    return stake
+
