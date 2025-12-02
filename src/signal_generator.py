@@ -110,4 +110,16 @@ class SignalGenerator:
         # Use the scorer that belongs to that regime
         scorer = self.scorers[regime_name]
         return scorer.score(bar_features)
+import asyncio
+from src.telemetry import trace
+
+async def signal_generator(feed_queue, signal_queue):
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_as_current_span("signal_generator"):
+        while True:
+            market_data = await feed_queue.get()
+            with tracer.start_as_current_span("evaluate_signal"):
+                # Your existing signal‑generation logic
+                signal = compute_signal(market_data)
+                await signal_queue.put(signal)
 
