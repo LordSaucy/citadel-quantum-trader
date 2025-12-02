@@ -159,4 +159,36 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 cqt-ingest = "cqt.data_ingest.collector:run"
 
 
+# ---------- Runtime ----------
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy the compiled wheels from the builder stage (if you keep the builder)
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+
+# Copy the whole source tree (including the new data_ingest package)
+COPY src/ src/
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create the data directory (will be a volume in production)
+RUN mkdir -p /app/data && chown -R 1000:1000 /app/data
+
+# Expose the API port (your bot) – keep unchanged
+EXPOSE 8000
+
+# -----------------------------------------------------------------
+# ENTRYPOINT – you can keep the bot as the main process and run the
+# collector as a *background* process via supervisord or a simple &
+# -----------------------------------------------------------------
+# Example using a tiny supervisor (runs both processes)
+RUN apt-get update && apt-get install -y dumb-init
+
+# Use dumb-init as PID 1 to reap children cleanly
+ENTRYPOINT ["dumb-init", "--"]
+
+# The command starts the collector in the background and then the bot
+CMD bash -c "python -u src/data_ingest/collector.py & exec python -u src/main.py"
+
  
