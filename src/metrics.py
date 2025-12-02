@@ -3,7 +3,6 @@ from prometheus_client import Counter, Gauge
 from src.edge_decay_detector import edge_decay_events_total, 
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
-
 bucket_winrate = Gauge(
     "bucket_winrate",
     "Rolling win‑rate (last 200 trades) per bucket",
@@ -84,5 +83,18 @@ def record_regime_match(matched: bool):
         regime_match_total.inc()
     else:
         regime_mismatch_total.inc()
+# LIR per bucket (signed float)
+lir_gauge = Gauge(
+    "bucket_liquidity_imbalance_ratio",
+    "Liquidity Imbalance Ratio for the bucket ([-1,1])",
+    ["bucket_id"]
+)
+
+# Total depth (sum of bid+ask volume) at the best 20 levels – useful for alerting
+depth_gauge = Gauge(
+    "bucket_market_depth",
+    "Sum of bid+ask volume (units) for the top 20 DOM levels",
+    ["bucket_id"]
+)
 
 
