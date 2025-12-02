@@ -56,3 +56,25 @@ def generate_signal(feature_vec: dict) -> bool:
     # You can decide to **AND** the two signals (conservative) or **OR** (aggressive)
     return meta_signal and smc_signal   # conservative default
 
+def evaluate_signal(market_data, dom_df):
+    # Existing SMC checks …
+    smc_ok = smc_filter(market_data)
+
+    # New LIR feature
+    lir = compute_lir(dom_df)
+
+    # Simple heuristic: require |LIR| > 0.3 for a signal to be considered
+    # (you can make this a tunable parameter in config.yaml)
+    lir_ok = abs(lir) > 0.30
+
+    # Confluence score – you already have a weighted sum of levers.
+    # Add LIR as an extra lever with weight w_lir (e.g., 0.15).
+    confluence_score = (
+        w_price_action * price_action_score +
+        w_ema_cross    * ema_cross_score +
+        w_atr_break    * atr_break_score +
+        w_lir          * (abs(lir) - 0.30)   # normalized to 0‑1
+    )
+
+    # Final decision
+    return smc_ok and lir_ok and confluence_score >= config["GRADE_A_PLUS"]
