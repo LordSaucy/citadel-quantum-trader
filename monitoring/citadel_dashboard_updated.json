@@ -70,3 +70,76 @@
   "title": "Arb Successes",
   "type": "stat"
 }
+
+{
+  "type": "stat",
+  "title": "Sentiment Guard Hits (last 5 min)",
+  "datasource": "Prometheus",
+  "targets": [
+    {
+      "expr": "increase(sentiment_guard_hits_total[5m])",
+      "refId": "A"
+    }
+  ],
+  "options": {
+    "reduceOptions": { "calcs": ["last"] },
+    "colorMode": "value",
+    "graphMode": "none"
+  },
+  "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+  "id": 101
+},
+{
+  "type": "stat",
+  "title": "Calendar Lock‑out (active?)",
+  "datasource": "Prometheus",
+  "targets": [
+    {
+      "expr": "calendar_lockout_active",
+      "refId": "A"
+    }
+  ],
+  "options": {
+    "reduceOptions": { "calcs": ["last"] },
+    "colorMode": "value",
+    "graphMode": "none"
+  },
+  "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+  "id": 102
+},
+{
+  "type": "stat",
+  "title": "Volatility Spike Hits (24 h)",
+  "datasource": "Prometheus",
+  "targets": [
+    {
+      "expr": "increase(volatility_spike_guard_hits_total[24h])",
+      "refId": "A"
+    }
+  ],
+  "options": {
+    "reduceOptions": { "calcs": ["last"] },
+    "colorMode": "value",
+    "graphMode": "none"
+  },
+  "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+  "id": 103
+},
+{
+  "type": "stat",
+  "title": "Shock Detector (any) – 24 h",
+  "datasource": "Prometheus",
+  "targets": [
+    {
+      "expr": "increase(shock_detector_hits_total[24h])",
+      "refId": "A"
+    }
+  ],
+  "options": {
+    "reduceOptions": { "calcs": ["last"] },
+    "colorMode": "value",
+    "graphMode": "none"
+  },
+  "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+  "id": 104
+}
