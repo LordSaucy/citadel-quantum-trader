@@ -109,3 +109,19 @@ groups:
           description: "Rolling win‑rate fell below the safety floor; risk fractions have been halved for affected buckets."
           runbook: "https://github.com/yourorg/citadel-qt/blob/main/docs/runbook.md#edge-decay"
 
+          groups:
+  - name: streak-alerts
+    interval: 1m
+    rules:
+      - alert: LongLossStreak
+        expr: max(bucket_streak_losses) by (bucket_id) > 3
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bucket {{ $labels.bucket_id }} has a {{ $value }}‑trade loss streak"
+          description: "The bot has lost {{ $value }} trades in a row on bucket {{ $labels.bucket_id }}. Consider pausing or investigating the market regime."
+
+
+
+
