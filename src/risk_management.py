@@ -14,6 +14,25 @@ from redis import Redis
 
 
 
+log = logging.getLogger("citadel_bot")
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+r = redis.from_url(REDIS_URL)
+KILL_SWITCH_KEY = "kill_switch_active"
+
+def kill_switch_active() -> bool:
+    val = r.get(KILL_SWITCH_KEY)
+    return bool(int(val or 0))
+
+# Inside your infinite trading loop:
+while True:
+    if kill_switch_active():
+        log.warning("⚠️ Kill‑switch ACTIVE – sleeping 5 s")
+        time.sleep(5)
+        continue   # skip all trading logic until cleared
+
+    # … existing signal generation, risk checks, execution …
+
 
 # ----------------------------------------------------------------------
 # Prometheus gauges (exported automatically by the Flask entrypoint)
