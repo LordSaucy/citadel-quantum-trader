@@ -11,7 +11,7 @@ from volatility_breakout import is_expanding
 from data_fetcher import get_recent_history   # existing helper that returns a DataFrame
 from .venue_manager import VenueManager
 from trade_logger import TradeLogger   # import the logger singleton or instantiate it
-
+from shock_detector import should_block_trade
 
 
 # -------------------------------------------------
@@ -146,6 +146,46 @@ def _watch_config(self):
         It should contain at least:
             - symbol, side (buy/sell), price, timestamp, quantity
         """
+
+        
+        # -------------------------------------------------
+        # 1️⃣ Run the unified shock‑detector
+        # -------------------------------------------------
+        blocked, reason = should_block_trade(symbol)
+        if blocked:
+            self.logger.warning(
+                f"⚡️ Trade for {symbol} BLOCKED by shock‑detector ({reason})"
+            )
+            # Record the block in the immutable ledger
+            from trade_logger import TradeLogger
+            TradeLogger().log_event(
+                {
+                    "event": "trade_blocked",
+                    "symbol": symbol,
+                    "reason": reason,
+                    "timestamp": time.time(),
+                }
+            )
+            # Increment a Prometheus gauge (optional)
+            from prometheus_client import Counter
+            blocked_counter = Counter(
+                "trade_blocked_reason_total",
+                "Blocked trades by reason",
+                ["reason"],
+            )
+            blocked_counter.labels(reason=reason).inc()
+            return  # **Exit early – no order will be sent**
+
+         -------------------------------------------------
+        # 2️⃣ Normal processing (regime filter, SMC, etc.)
+        # -------------------------------------------------
+        if not self.regime_filter.allows(signal):
+            return  # regime rejected – already logged elsewhere
+
+        # ... existing risk‑check, position‑stacking, etc.
+        self.execute_trade(signal)
+
+            
         # -----------------------------------------------------------------
         # 1️⃣ Calendar lock‑out (high‑impact macro events)
         # -----------------------------------------------------------------
