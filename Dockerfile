@@ -132,4 +132,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY simulate_wr.py .
 ENTRYPOINT ["python", "/app/simulate_wr.py"]
+
+# Copy the trained LightGBM model (make sure the path matches the code)
+COPY models/lightgbm_model.txt /app/models/lightgbm_model.txt
+
+# (optional) also copy the JSON weight file for the linear fallback
+COPY config/lever_weights.json /app/config/lever_weights.json
+
  
