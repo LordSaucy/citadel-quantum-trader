@@ -7,6 +7,7 @@ from opentelemetry.exporter.jaeger.thrift import JaegerExporter
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.instrumentation.asyncio import AsyncioInstrumentor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import 
 
 # -------------------------------------------------
 # 1️⃣ Configure the resource (service name, version, etc.)
