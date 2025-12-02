@@ -85,3 +85,12 @@ export default function Dashboard() {
     </Container>
   );
 }
+
+    {
+  "type": "stat",
+  "title": "Sentiment Guard Hits",
+  "datasource": "Prometheus",
+  "targets": [{ "expr": "sentiment_guard_hits_total", "refId": "A" }],
+  "options": { "reduceOptions": { "calcs": ["last"] } }
+}
+
