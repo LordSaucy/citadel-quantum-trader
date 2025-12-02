@@ -286,6 +286,9 @@ class RiskManagementLayer:
     # Existing `compute_stake` – now uses the dynamic usable capital
     # -----------------------------------------------------------------
     def compute_stake(self, bucket_id: int, equity: float) -> float:
+        with engine.connect() as conn:
+        f = get_risk_fraction(bucket_id, conn)
+
         """
         Returns the dollar amount to risk on the next trade.
         The stake is calculated as:
@@ -306,3 +309,15 @@ class RiskManagementLayer:
         # 3️⃣ Apply the schedule fraction
         stake = equity * effective_frac
         return stake
+
+def get_risk_fraction(bucket_id: int, conn) -> float:
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT risk_fraction FROM bucket_meta WHERE bucket_id = %s",
+        (bucket_id,)
+    )
+    row = cur.fetchone()
+    if row:
+        return float(row[0])
+    # fallback to schedule dict if meta missing
+    return RISK_SCHEDULE.get(bucket_id, RISK_SCHEDULE.get("default", 0.40))
