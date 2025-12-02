@@ -12,6 +12,10 @@ from data_fetcher import get_recent_history   # existing helper that returns a D
 from .venue_manager import VenueManager
 from trade_logger import TradeLogger   # import the logger singleton or instantiate it
 from shock_detector import should_block_trade
+from regime_ensemble import match_regime, current_regime_vector
+from garch_vol import forecast_vol   # you already have a GARCH helper
+
+
 
 from .guard_helpers import (
     check_depth,
