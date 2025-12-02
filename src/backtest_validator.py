@@ -15,7 +15,10 @@ import time
 from datetime import datetime, date, time as dt_time, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from .costs import total_cost_pips    
+from .costs import total_cost_pips 
+from regime_ensemble import load_bank, match_regime, current_regime_vector
+from garch_vol import forecast_vol
+
 
 # ----------------------------------------------------------------------
 # Third‑party
@@ -39,6 +42,9 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+BANK_CENTROIDS, BANK_META = load_bank()
+
 
 
 # ----------------------------------------------------------------------
