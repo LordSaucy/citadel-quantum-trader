@@ -1064,3 +1064,31 @@ networks:
 volumes:
   vault-secrets:
   # pgdata-paper:   # uncomment if you enable the paper DB
+
+  services:
+  citadel-bot:
+    image: citadel/trader:latest
+    environment:
+      # Use the *live* secret (real credentials) but enable shadow mode
+      VAULT_SECRET_PATH: "secret/data/citadel/live_mt5"   # or live_ibkr
+      SHADOW_MODE: "true"
+    volumes:
+      - ./vault/agent.hcl:/etc/vault/agent.hcl:ro
+      - vault-secrets:/run/secrets
+      - ./logs:/var/log/cqt   # expose the shadow.log to the host
+    entrypoint: ["/bin/sh","-c","\
+      vault agent -config=/etc/vault/agent.hcl -exit-after-auth \
+      && python src/main.py"]
+    networks:
+      - internal
+
+# (Optional) keep the same monitoring stack – Prometheus will scrape the
+# new `shadow` labelled metrics automatically.
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  vault-secrets:
+  logs:   # persists the shadow.log for later analysis
+
