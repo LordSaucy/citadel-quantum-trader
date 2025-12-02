@@ -362,6 +362,40 @@ alertmanager:
       - backend
     restart: unless-stopped
 
+ # -------------------------------------------------
+  # 9️⃣ Global Risk‑Budget Controller
+  # -------------------------------------------------
+  global-risk-controller:
+    build:
+      context: ./admin_ui/global_risk_controller
+      dockerfile: Dockerfile
+    container_name: citadel-global-risk
+    environment:
+      - DB_URI=postgresql://citadel:${POSTGRES_PASSWORD}@citadel-db:5432/citadel
+      - MAX_GLOBAL_RISK=0.05
+    depends_on:
+      - citadel-db
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # -------------------------------------------------
+  # 10️⃣ Edge‑Decay Detector (runs as side‑car)
+  # -------------------------------------------------
+  edge-decay-detector:
+    build:
+      context: ./admin_ui/edge_decay_detector
+      dockerfile: Dockerfile
+    container_name: citadel-edge-decay
+    environment:
+      - DB_URI=postgresql://citadel:${POSTGRES_PASSWORD}@citadel-db:5432/citadel
+      - PROMETHEUS_URL=http://prometheus:9090
+    depends_on:
+      - citadel-db
+      - prometheus
+    networks:
+      - backend
+    restart: unless-stopped
 
 
  
