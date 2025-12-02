@@ -24,3 +24,16 @@ class BrokerInterface(ABC):
     def send_order_secondary(self, **kwargs) -> dict:
         """Send order to the *secondary* broker. Same contract as send_order."""
 
+ @abstractmethod
+    async def get_book_depth(self, symbol: str, price: float) -> float:
+        """Return the total available volume (in lots) at the given price level."""
+        ...
+
+    @abstractmethod
+    async def submit_order_async(
+        self, symbol: str, volume: float, side: str, price: float | None = None
+    ) -> str:
+        """Submit an order and immediately return a *ticket* identifier.
+        The concrete implementation must fire a websocket / callback when the order
+        is fully filled, partially filled or rejected."""
+        ...
