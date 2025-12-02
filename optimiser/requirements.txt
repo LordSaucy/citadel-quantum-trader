@@ -2,3 +2,9 @@ deap==1.4.1
 numpy
 pandas
 pyyaml
+prometheus-client>=0.19
+sqlite3   # built‑in, no pip needed
+# optional (if you need Vault or AWS):
+hvac>=2.0
+boto3>=1.34
+
