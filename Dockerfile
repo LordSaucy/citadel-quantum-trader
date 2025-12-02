@@ -122,11 +122,6 @@ RUN pip install --upgrade pip && \
 # Add the new libs
 RUN pip install matplotlib seaborn
 
-# Rest of the Dockerfile stays the same
-
-docker compose build citadel-bot
-docker compose up -d citadel-bot
-
 # after installing requirements
 COPY migrations/2025-11-30_add_aggressive_pool.sql /docker-entrypoint-initdb.d/
 
