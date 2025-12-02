@@ -1,0 +1,541 @@
+# backtest/report.py
+"""
+Back‑test Reporting Module
+
+Generates a full performance package (CSV, JSON, Markdown, PDF + charts)
+for a Citadel Quantum Trader back‑test run.
+
+Author: Lawful Banker
+Created: 2024‑11‑26
+Version: 2.0 – Production‑Ready
+"""
+
+# ----------------------------------------------------------------------
+# Standard library
+# ----------------------------------------------------------------------
+import json
+import logging
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Sequence, Tuple, Union
+
+# ----------------------------------------------------------------------
+# Third‑party
+# ----------------------------------------------------------------------
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+# Jinja2 for HTML templating (used for the PDF report)
+from jinja2 import Environment, BaseLoader
+
+# Optional PDF conversion – we try to import, otherwise we fall back to Markdown
+try:
+    from weasyprint import HTML  # type: ignore
+    _PDF_AVAILABLE = True
+except Exception:  # pragma: no cover
+    _PDF_AVAILABLE = False
+
+# ----------------------------------------------------------------------
+# Logging configuration (module‑level logger)
+# ----------------------------------------------------------------------
+LOGGER = logging.getLogger("backtest.report")
+if not LOGGER.handlers:  # avoid duplicate handlers when reloaded
+    LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    LOG_LEVEL = logging.INFO
+    logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
+
+# ----------------------------------------------------------------------
+# Helper functions (pure‑Python, reusable)
+# ----------------------------------------------------------------------
+def _to_dataframe(
+    trades: Union[pd.DataFrame, Sequence[Dict]],
+) -> pd.DataFrame:
+    """Coerce a list‑of‑dicts or a DataFrame into a clean DataFrame."""
+    if isinstance(trades, pd.DataFrame):
+        df = trades.copy()
+    else:
+        df = pd.DataFrame(list(trades))
+
+    # Normalise column names (lower‑case, underscores)
+    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+
+    # Required columns – raise early if missing
+    required = {"symbol", "direction", "entry_price", "exit_price", "lot", "profit"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required trade columns: {missing}")
+
+    # Ensure numeric types
+    numeric_cols = ["entry_price", "exit_price", "lot", "profit"]
+    df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+    return df
+
+
+def _calc_drawdown(equity_series: pd.Series) -> pd.Series:
+    """
+    Compute the draw‑down series (percentage) from an equity curve.
+    Returns a Series indexed like ``equity_series``.
+    """
+    hwm = equity_series.cummax()
+    drawdown = (equity_series - hwm) / hwm * 100.0
+    return drawdown
+
+
+def _annual_factor(freq: str) -> float:
+    """Return the annualisation factor for a given frequency."""
+    if freq == "D":
+        return 252  # trading days per year
+    if freq == "H":
+        return 252 * 24
+    if freq == "M":
+        return 252 * 24 * 60
+    return 252  # default to daily
+
+
+# ----------------------------------------------------------------------
+# Core reporting class
+# ----------------------------------------------------------------------
+class BacktestReporter:
+    """
+    Takes the raw back‑test trade data and produces a complete report
+    (CSV, JSON, Markdown, PDF + charts).
+
+    Typical usage:
+
+    >>> reporter = BacktestReporter(trades, config, output_dir="reports/run_001")
+    >>> reporter.run()
+    """
+
+    def __init__(
+        self,
+        trades: Union[pd.DataFrame, Sequence[Dict]],
+        config: Dict,
+        output_dir: Union[str, Path] = "backtest_reports",
+        title: str = "Citadel Quantum Trader – Back‑test Report",
+    ):
+        """
+        Parameters
+        ----------
+        trades
+            Raw trade list (list of dicts) or a pandas DataFrame.
+        config
+            The configuration dict that generated the back‑test (risk schedule,
+            cost model, etc.).  It will be embedded in the JSON report.
+        output_dir
+            Destination folder – created if it does not exist.
+        title
+            Title used in the PDF/HTML header.
+        """
+        self.trades_raw = trades
+        self.config = config
+        self.title = title
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Will be filled after ``_prepare`` is called
+        self.df: pd.DataFrame = pd.DataFrame()
+        self.metrics: Dict = {}
+        self.plots: Dict[str, Path] = {}
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def run(self) -> None:
+        """Execute the full pipeline: prepare → metrics → plots → files."""
+        LOGGER.info("Preparing back‑test data")
+        self._prepare()
+        LOGGER.info("Calculating performance metrics")
+        self._calc_metrics()
+        LOGGER.info("Generating visualisations")
+        self._make_plots()
+        LOGGER.info("Writing artefacts (CSV, JSON, MD, PDF)")
+        self._write_outputs()
+        LOGGER.info(f"Back‑test report written to {self.output_dir.resolve()}")
+
+    # ------------------------------------------------------------------
+    # Step 1 – data preparation
+    # ------------------------------------------------------------------
+    def _prepare(self) -> None:
+        """Coerce raw trades into a clean DataFrame and compute auxiliary columns."""
+        self.df = _to_dataframe(self.trades_raw)
+
+        # Derive profit if not supplied (fallback)
+        if "profit" not in self.df.columns or self.df["profit"].isna().any():
+            self.df["profit"] = (
+                (self.df["exit_price"] - self.df["entry_price"])
+                * self.df["lot"]
+                * 100_000  # standard lot multiplier (adjust if you use a different contract size)
+            )
+            # Adjust sign for SELL direction
+            self.df.loc[self.df["direction"] == "SELL", "profit"] *= -1
+
+        # Cumulative equity curve (starting from initial capital)
+        initial_capital = self.config.get("initial_capital", 100_000.0)
+        self.df["cum_profit"] = self.df["profit"].cumsum() + initial_capital
+        self.df["timestamp"] = pd.to_datetime(self.df["timestamp"], utc=True)
+
+        # Ensure chronological order
+        self.df.sort_values("timestamp", inplace=True)
+
+    # ------------------------------------------------------------------
+    # Step 2 – performance metrics
+    # ------------------------------------------------------------------
+    def _calc_metrics(self) -> None:
+        """Populate ``self.metrics`` with a dictionary of key performance indicators."""
+        df = self.df
+        total_trades = len(df)
+        win_trades = df[df["profit"] > 0]
+        loss_trades = df[df["profit"] <= 0]
+
+        gross_profit = df["profit"].sum()
+        net_profit = df["profit"].sum()  # after costs already applied in the dataframe
+        win_rate = len(win_trades) / total_trades * 100 if total_trades else 0.0
+        avg_win = win_trades["profit"].mean() if not win_trades.empty else 0.0
+        avg_loss = loss_trades["profit"].mean() if not loss_trades.empty else 0.0
+        expectancy = (avg_win * (win_rate / 100.0)) + (avg_loss * ((100 - win_rate) / 100.0))
+
+        # Sharpe & Sortino (using daily returns – assume timestamps are daily)
+        daily_returns = df.set_index("timestamp")["profit"].resample("D").sum()
+        daily_std = daily_returns.std(ddof=1)
+        daily_mean = daily_returns.mean()
+        sharpe = (daily_mean / daily_std) * np.sqrt(_annual_factor("D")) if daily_std != 0 else np.nan
+
+        # Downside deviation for Sortino
+        downside = daily_returns[daily_returns < 0]
+        downside_std = downside.std(ddof=1)
+        sortino = (
+            (daily_mean / downside_std) * np.sqrt(_annual_factor("D"))
+            if downside_std != 0
+            else np.nan
+        )
+
+        # Max draw‑down
+        drawdown_series = _calc_drawdown(df["cum_profit"])
+        max_dd = drawdown_series.min()  # most negative value (percentage)
+
+        # Calmar ratio (annualised return / max draw‑down)
+        total_years = (df["timestamp"].iloc[-1] - df["timestamp"].iloc[0]).days / 365.25
+        annual_return = (df["cum_profit"].iloc[-1] / df["cum_profit"].iloc[0]) ** (1 / total_years) - 1
+        calmar = -annual_return / (max_dd / 100) if max_dd != 0 else np.nan
+
+        # Profit factor
+        profit_factor = (
+            win_trades["profit"].sum() / -loss_trades["profit"].sum()
+            if not loss_trades.empty and loss_trades["profit"].sum() != 0
+            else np.nan
+        )
+
+        self.metrics = {
+            "total_trades": total_trades,
+            "gross_profit": float(gross_profit),
+            "net_profit": float(net_profit),
+            "win_rate_pct": float(win_rate),
+            "average_win": float(avg_win),
+            "average_loss": float(avg_loss),
+            "expectancy": float(expectancy),
+            "sharpe_ratio": float(sharpe),
+            "sortino_ratio": float(sortino),
+            "max_drawdown_pct": float(max_dd),
+            "calmar_ratio": float(calmar),
+            "profit_factor": float(profit_factor),
+            "initial_capital": float(self.config.get("initial_capital", 100_000.0)),
+            "final_equity": float(df["cum_profit"].iloc[-1]),
+            "total_years": float(total_years),
+            "annual_return_pct": float(annual_return * 100),
+        }
+
+    # ------------------------------------------------------------------
+    # Step 3 – visualisations
+    # ------------------------------------------------------------------
+    def _make_plots(self) -> None:
+        """Create PNG charts and store their paths in ``self.plots``."""
+        df = self.df
+        out = self.output_dir
+
+        # 1️⃣ Equity curve
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(df["timestamp"], df["cum_profit"], label="Equity")
+        ax.set_title("Equity Curve")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Equity ($)")
+        ax.grid(True)
+        ax.legend()
+        equity_path = out / "equity_curve.png"
+        fig.savefig(equity_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        self.plots["equity_curve"] = equity_path
+
+        # 2️⃣ Draw‑down curve
+        dd_series = _calc_drawdown(df["cum_profit"])
+        fig, ax = plt.subplots(figsize=(10, 3))
+        ax.plot(df["timestamp"], dd_series, color="red", label="Draw‑down")
+        ax.set_title("Draw‑down (%)")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("%")
+        ax.grid(True)
+        ax.legend()
+        dd_path = out / "drawdown_curve.png"
+        fig.savefig(dd_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        self.plots["drawdown_curve"] = dd_path
+
+        # 3️⃣ Profit‑Loss histogram
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.hist(df["profit"], bins=30, color="#2c7bb6", edgecolor="black")
+        ax.set_title("Profit‑Loss Distribution")
+        ax.set_xlabel("Profit per trade ($)")
+        ax.set_ylabel("Frequency")
+        ax.grid(True)
+        hist_path = out / "profit_histogram.png"
+        fig.savefig(hist_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        self.plots["profit_histogram"] = hist_path
+
+        # 4️⃣ Cumulative win‑rate (running)
+        cum_win = (df["profit"] > 0).cumsum()
+        cum_total = np.arange(1, len(df) + 1)
+        win_rate_series = cum_win / cum_total * 100
+
+        fig, ax = plt.subplots(figsize=(10, 3))
+        ax.plot(df["timestamp"], win_rate_series, color="#7fc97f")
+        ax.set_title("Cumulative Win‑rate")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Win‑rate (%)")
+        ax.grid(True)
+        winrate_path = out / "cumulative_winrate.png"
+        fig.savefig(winrate_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        self.plots["cumulative_winrate"] = winrate_path
+
+    # ------------------------------------------------------------------
+    # Step 4 – write artefacts (CSV, JSON, Markdown, PDF)
+    # ------------------------------------------------------------------
+    def _write_outputs(self) -> None:
+        out = self.output_dir
+
+        # ---- 1️⃣ Raw trades CSV (sorted chronologically) ----
+        csv_path = out / "trades.csv"
+        self.df.to_csv(csv_path, index=False, float_format="%.6f")
+        LOGGER.info(f"Wrote trades CSV → {csv_path}")
+
+        # ---- 2️⃣ JSON summary (metrics + config) ----
+        json_path = out / "summary.json"
+        summary = {
+            "metadata": {
+                "generated_at": datetime.utcnow().isoformat() + "Z",
+                "title": self.title,
+                "config": self.config,
+            },
+            "metrics": self.metrics,
+        }
+        with open(json_path, "w") as fh:
+            json.dump(summary, fh, indent=2)
+        LOGGER.info(f"Wrote JSON summary → {json_path}")
+
+        # ---- 3️⃣ Markdown executive summary ----
+        md_path = out / "report.md"
+        md_content = self._render_markdown()
+        md_path.write_text(md_content, encoding="utf-8")
+        LOGGER.info(f"Wrote Markdown report → {md_path}")
+
+        # ---- 4️⃣ PDF report (HTML → PDF) ----
+        pdf_path = out / "report.pdf"
+        if _PDF_AVAILABLE:
+            html_content = self._render_html()
+            HTML(string=html_content).write_pdf(str(pdf_path))
+            LOGGER.info(f"Wrote PDF report → {pdf_path}")
+        else:
+            LOGGER.warning(
+                "WeasyPrint not available – PDF report skipped (install weasyprint for PDF output)"
+            )
+
+    # ------------------------------------------------------------------
+    # Rendering helpers (HTML & Markdown)
+    # ------------------------------------------------------------------
+    def _render_markdown(self) -> str:
+        """Create a human‑readable Markdown document."""
+        md = [
+            f"# {self.title}",
+            "",
+            f"*Generated:* {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%SZ')}",
+            "",
+            "## Executive Summary",
+            "",
+            f"- **Initial capital:** ${self.metrics['initial_capital']:,.2f}",
+            f"- **Final equity:** ${self.metrics['final_equity']:,.2f}",
+            f"- **Net profit:** ${self.metrics['net_profit']:,.2f} "
+            f"({self.metrics['net_profit']/self.metrics['initial_capital']*100:.2f} %)",
+            f"- **Total trades:** {self.metrics['total_trades']}",
+            f"- **Win‑rate:** {self.metrics['win_rate_pct']:.2f} %",
+            f"- **Expectancy:** ${self.metrics['expectancy']:.2f}",
+            f"- **Sharpe ratio:** {self.metrics['sharpe_ratio']:.2f}",
+            f"- **Sortino ratio:** {self.metrics['sortino_ratio']:.2f}",
+            f"- **Max draw‑down:** {self.metrics['max_drawdown_pct']:.2f} %",
+            f"- **Calmar ratio:** {self.metrics['calmar_ratio']:.2f}",
+   def _render_html(self) -> str:
+        """
+        Render a self‑contained HTML document (used for the PDF export).
+        Images are embedded as base64 data‑URIs so the PDF generator does not
+        need external file access.
+        """
+        # ------------------------------------------------------------------
+        # Helper to embed an image as base64
+        # ------------------------------------------------------------------
+        def _embed_image(path: Path) -> str:
+            import base64
+
+            mime = "image/png"
+            data = path.read_bytes()
+            b64 = base64.b64encode(data).decode()
+            return f"data:{mime};base64,{b64}"
+
+        # ------------------------------------------------------------------
+        # Simple Jinja2 template (inline for portability)
+        # ------------------------------------------------------------------
+        template = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <style>
+        body {font-family: Arial, Helvetica, sans-serif; margin: 40px;}
+        h1, h2, h3 {color: #2c3e50;}
+        table {border-collapse: collapse; width: 100%; margin-bottom: 30px;}
+        th, td {border: 1px solid #ddd; padding: 8px; text-align: left;}
+        th {background-color: #f2f2f2;}
+        .metric {font-weight: bold; color: #2980b9;}
+        img {max-width: 100%; height: auto; margin: 10px 0;}
+        .footer {font-size: 0.8em; color: #777; margin-top: 40px;}
+    </style>
+</head>
+<body>
+    <h1>{{ title }}</h1>
+    <p><em>Generated {{ generated_at }}</em></p>
+
+    <h2>Executive Summary</h2>
+    <table>
+        <tr><th>Initial Capital</th><td>${{ metrics.initial_capital:,.2f }}</td></tr>
+        <tr><th>Final Equity</th><td>${{ metrics.final_equity:,.2f }}</td></tr>
+        <tr><th>Net Profit</th><td>${{ metrics.net_profit:,.2f }} ({{ (metrics.net_profit/metrics.initial_capital*100):.2f }} %)</td></tr>
+        <tr><th>Total Trades</th><td>{{ metrics.total_trades }}</td></tr>
+        <tr><th>Win‑rate</th><td>{{ metrics.win_rate_pct:.2f }} %</td></tr>
+        <tr><th>Expectancy</th><td>${{ metrics.expectancy:.2f }}</td></tr>
+        <tr><th>Sharpe Ratio</th><td>{{ metrics.sharpe_ratio:.2f }}</td></tr>
+        <tr><th>Sortino Ratio</th><td>{{ metrics.sortino_ratio:.2f }}</td></tr>
+        <tr><th>Max Draw‑down</th><td>{{ metrics.max_drawdown_pct:.2f }} %</td></tr>
+        <tr><th>Calmar Ratio</th><td>{{ metrics.calmar_ratio:.2f }}</td></tr>
+        <tr><th>Profit Factor</th><td>{{ metrics.profit_factor:.2f }}</td></tr>
+        <tr><th>Annual Return</th><td>{{ metrics.annual_return_pct:.2f }} %</td></tr>
+    </table>
+
+    <h2>Charts</h2>
+    <h3>Equity Curve</h3>
+    <img src="{{ equity_img }}" alt="Equity Curve">
+
+    <h3>Draw‑down Curve</h3>
+    <img src="{{ drawdown_img }}" alt="Draw‑down Curve">
+
+    <h3>Profit‑Loss Histogram</h3>
+    <img src="{{ histogram_img }}" alt="Profit‑Loss Histogram">
+
+    <h3>Cumulative Win‑rate</h3>
+    <img src="{{ winrate_img }}" alt="Cumulative Win‑rate">
+
+    <h2>Configuration Snapshot</h2>
+    <pre>{{ config_json }}</pre>
+
+    <div class="footer">
+        Report generated by Citadel Quantum Trader – © 2024 Lawful Banker
+    </div>
+</body>
+</html>
+"""
+        # ------------------------------------------------------------------
+        # Prepare context for rendering
+        # ------------------------------------------------------------------
+        ctx = {
+            "title": self.title,
+            "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%SZ"),
+            "metrics": self.metrics,
+            "equity_img": _embed_image(self.plots["equity_curve"]),
+            "drawdown_img": _embed_image(self.plots["drawdown_curve"]),
+            "histogram_img": _embed_image(self.plots["profit_histogram"]),
+            "winrate_img": _embed_image(self.plots["cumulative_winrate"]),
+            "config_json": json.dumps(self.config, indent=2, sort_keys=True),
+        }
+
+        env = Environment(loader=BaseLoader())
+        tmpl = env.from_string(template)
+        return tmpl.render(**ctx)
+
+    # ------------------------------------------------------------------
+    # Convenience CLI entry‑point
+    # ------------------------------------------------------------------
+    @classmethod
+    def cli(cls) -> None:
+        """
+        Minimal command‑line interface:
+
+        python -m backtest.report \\
+            --trades path/to/trades.csv \\
+            --config path/to/config.json \\
+            --output reports/run_001 \\
+            [--title "My Back‑test Report"]
+        """
+        import argparse
+        import sys
+
+        parser = argparse.ArgumentParser(
+            description="Generate a full back‑test report (CSV, JSON, MD, PDF)."
+        )
+        parser.add_argument(
+            "--trades",
+            required=True,
+            help="Path to CSV (or JSON) containing raw trade data.",
+        )
+        parser.add_argument(
+            "--config",
+            required=True,
+            help="Path to JSON file with the back‑test configuration.",
+        )
+        parser.add_argument(
+            "--output",
+            default="backtest_reports",
+            help="Directory where the report artefacts will be written.",
+        )
+        parser.add_argument(
+            "--title",
+            default="Citadel Quantum Trader – Back‑test Report",
+            help="Title used in the PDF/HTML header.",
+        )
+        args = parser.parse_args()
+
+        # Load inputs
+        try:
+            trades_df = pd.read_csv(args.trades)
+        except Exception as exc:
+            sys.exit(f"Failed to read trades file: {exc}")
+
+        try:
+            with open(args.config, "r") as fh:
+                config = json.load(fh)
+        except Exception as exc:
+            sys.exit(f"Failed to read config file: {exc}")
+
+        reporter = cls(
+            trades=trades_df,
+            config=config,
+            output_dir=args.output,
+            title=args.title,
+        )
+        reporter.run()
+
+
+# ----------------------------------------------------------------------
+# When the module is executed directly, invoke the CLI
+# ----------------------------------------------------------------------
+if __name__ == "__main__":
+    Ba
