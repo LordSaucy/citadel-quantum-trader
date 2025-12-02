@@ -1,0 +1,61 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'default'
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # Critical alerts go to PagerDuty (or Slack if you prefer)
+    - match:
+        severity: critical
+      receiver: pagerduty
+
+    # Warnings go to Slack
+    - match:
+        severity: warning
+      receiver: slack
+
+    # Everything else (info) goes to Telegram
+    - receiver: telegram
+
+receivers:
+  # ------------------- Slack -------------------
+  - name: slack
+    slack_configs:
+      - api_url: '<SLACK_WEBHOOK_URL>'
+        channel: '#citadel-alerts'
+        send_resolved: true
+        title: '{{ .CommonAnnotations.summary }}'
+        text: |
+          *Alert:* {{ .CommonAnnotations.summary }}
+          *Details:* {{ .CommonAnnotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Instance:* {{ .Labels.instance }}
+
+  # ------------------- PagerDuty -------------------
+  - name: pagerduty
+    pagerduty_configs:
+      - service_key: '<PAGERDUTY_INTEGRATION_KEY>'
+        severity: '{{ .Labels.severity }}'
+        send_resolved: true
+        details:
+          bucket: '{{ .Labels.bucket_id }}'
+          drawdown: '{{ .Value }}'
+
+  # ------------------- Telegram -------------------
+  - name: telegram
+    telegram_configs:
+      - bot_token: '<TELEGRAM_BOT_TOKEN>'
+        chat_id: '<TELEGRAM_CHAT_ID>'
+        message: |
+          *{{ .CommonAnnotations.summary }}*
+          {{ .CommonAnnotations.description }}
+          Severity: {{ .Labels.severity }}
+          Bucket: {{ .Labels.bucket_id }}
+        parse_mode: Markdown
+        disable_notification: false
+        send_resolved: true
