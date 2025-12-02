@@ -251,3 +251,11 @@ features:
   order_flow_delta:
     lookback_ticks: 200
 
+scorer:
+  ensemble_weights:
+    linear: 0.6
+    tree:   0.4
+  # Paths to the model files
+  linear_weights_path: models/linear_weights.json
+  tree_model_path:     models/tree_scorer.bin
+  tree_feature_order:  models/tree_feature_order.json
