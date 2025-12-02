@@ -7,6 +7,9 @@ from prometheus_client import Histogram, Counter
 from smc import SMCEngine
 engine = SMCEngine()          # created at start‑up
 from config_loader import Config
+from volatility_breakout import is_expanding
+from data_fetcher import get_recent_history   # existing helper that returns a DataFrame
+
 
 
 # ----------------------------------------------------------------------
@@ -70,6 +73,17 @@ class IBKRGateway:
         # TODO: integrate ib_insync / REST API here
         return True
 
+def generate_signal(bar, previous_bar):
+    # 1️⃣ Get recent history for ATR calculation (e.g., last 30 bars)
+    hist = get_recent_history(symbol=bar['symbol'], length=30)   # returns DataFrame
+
+    # 2️⃣ Volatility breakout test
+    if not is_expanding(bar, previous_bar, hist):
+        logger.debug("Volatility breakout filter rejected signal")
+        return None
+
+    # 3️⃣ Continue with existing regime‑forecast, etc.
+    ...
 
 # ----------------------------------------------------------------------
 # Main execution engine – orchestrates risk checks, confluence scores,
