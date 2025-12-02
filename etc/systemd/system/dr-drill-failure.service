@@ -1,0 +1,19 @@
+# /etc/systemd/system/dr-drill-failure.service
+[Unit]
+Description=Notify Slack on DR‑drill failure
+Documentation=https://github.com/yourorg/citadel-qt   # optional
+
+[Service]
+Type=oneshot
+# Replace the webhook URL with your actual Slack Incoming Webhook
+ExecStart=/usr/bin/curl -X POST -H 'Content-Type: application/json' \
+  -d '{"text":"⚠️ *Citadel DR‑drill* failed on $(hostname) – check `systemctl status dr-drill.service`"}' \
+  https://hooks.slack.com/services/XXXXX/XXXXX/XXXXX
+# Run as root (no special privileges needed for curl)
+User=root
+Group=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
