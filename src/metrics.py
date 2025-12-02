@@ -29,3 +29,10 @@ global_risk_percentage = Gauge("global_risk_percentage",
                                "Aggregate risk exposure as % of total AUM")
 
 edge_decay_current_wr
+
+epth_ok_gauge = Gauge(
+    "depth_check_ok_total",
+    "Number of depth checks that passed the minimum‑depth rule",
+    ["bucket_id", "symbol"]
+)
+
