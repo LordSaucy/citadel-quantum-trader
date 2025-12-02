@@ -681,4 +681,9 @@ def record_trade_result(self, bucket_id: int, pnl_usd: float) -> None:
 
     # Persist changes
     self.db.update_bucket(bucket_id, bucket)
+current_stacks = self.get_current_stacks(symbol)   # how many open positions we already have
+allowed = position_stacking_manager.max_allowed_stacks(symbol, symbol_atr)
+
+if current_stacks >= allowed:
+    raise RuntimeError(f"Stack limit reached for {symbol} (max {allowed})")
 
