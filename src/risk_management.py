@@ -395,3 +395,6 @@ def _apply_edge_modifier(bucket_id: int, conn, base_fraction: float) -> float:
     conn.commit()
     return new_fraction
 
+def log_depth_check(self, **kwargs):
+    from .trade_logger import TradeLogger
+    TradeLogger().log_depth_check(**kwargs)
