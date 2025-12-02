@@ -1,5 +1,29 @@
 # src/data_ingest/utils.py
 import pandas as pd, pathlib, time, functools, logging
+import logging
+from datetime import datetime, timedelta
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+def daterange(start: datetime, end: datetime):
+    """Yield each date (midnight) between start and end inclusive."""
+    cur = start
+    while cur <= end:
+        yield cur
+        cur += timedelta(days=1)
+
+
+def parquet_path(base_dir: Path, symbol: str, dt: datetime) -> Path:
+    """
+    Return the full path where the parquet for a given symbol/date should live.
+    Example: data/EURUSD/EURUSD_2024-09-30.parquet
+    """
+    subdir = base_dir / symbol
+    subdir.mkdir(parents=True, exist_ok=True)
+    filename = f"{symbol}_{dt.strftime('%Y-%m-%d')}.parquet"
+    return subdir / filename
+
 
 DATA_ROOT = pathlib.Path(__file__).parents[2] / "data"   # repo_root/data/
 
