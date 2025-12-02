@@ -3,10 +3,24 @@ from typing import Dict, Any
 
 from .config import logger
 from .risk_management import RiskManagementLayer
+from prometheus_client import Histogram, Counter
 
 # ----------------------------------------------------------------------
 # Stubbed broker adapters – replace with real MT5 / IBKR SDK calls
 # ----------------------------------------------------------------------
+# Existing histogram (you already have this)
+order_latency_seconds = Histogram(
+    "order_latency_seconds",
+    "Latency from order submission to broker ACK (seconds)",
+    buckets=[0.01, 0.05, 0.1, 0.2, 0.5, 1.0],
+)
+
+# New counter to capture price‑difference after fill
+order_price_slippage = Counter(
+    "order_price_slippage",
+    "Absolute price difference between submitted price and fill price (pips)",
+    ["symbol", "side"],
+)
 class MT5Gateway:
     def __init__(self, host: str, login: str, password: str):
         self.host = host
@@ -109,6 +123,28 @@ class AdvancedExecutionEngine:
         else:
             logger.error("Broker rejected order %s %s", side, symbol)
             return {"executed": False, "reason": "broker rejection"}
+
+ def send_order(self, symbol, volume, side, price=None, sl=None, tp=None, comment=""):
+        # 1️⃣ Record *submission* timestamp and price
+        submit_ts = time.time()
+        submit_price = price if price is not None else self.market_price(symbol)
+
+        # 2️⃣ Send the order to the broker (still async / blocking as before)
+        order_id = self.broker.send_order(
+            symbol=symbol,
+            volume=volume,
+            side=side,
+            price=price,
+            sl=sl,
+            tp=tp,
+            comment=comment,
+        )
+
+        # 3️⃣ Wait for the broker’s ACK/fill callback (you probably already have a
+        #    `on_order_filled(order_id, fill_price, fill_ts)` hook somewhere).
+        #    Hook into that callback to compute latency & slippage.
+        return order_id, submit_ts, submit_price
+ 
 
 new_equity = self.account.get_equity()   # whatever method you have
 self.risk_manager.calculate_usable_capital(bucket_id=self.bucket_id,
