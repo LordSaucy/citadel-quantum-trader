@@ -570,3 +570,7 @@ class MarketRegimeDetector:
 # Global singleton – import this from ``src/main.py`` and use it directly
 # ----------------------------------------------------------------------
 market_regime_detector = MarketRegimeDetector()
+
+def predict_regime(df: pd.DataFrame) -> str:
+    # ... returns one of "trend", "range", "high_vol"
+
