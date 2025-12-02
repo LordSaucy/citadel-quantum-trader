@@ -472,4 +472,21 @@ Add the new service definition (replace the placeholder you already have, or ins
       - backend
     restart: unless-stopped
 
+    services:
+  # … existing citadel‑bot, prometheus, grafana, vault …
+
+  dd_monitor:
+    image: citadel/dd-monitor:latest   # you can build it locally from src/dd_monitor.py
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - CONFIG_PATH=/etc/citadel/config.yaml
+    volumes:
+      - ./config:/etc/citadel:ro
+    depends_on:
+      - citadel-db
+      - vault
+    # Run every hour via a simple cron inside the container
+    command: ["sh", "-c", "while true; do python /app/dd_monitor.py; sleep 3600; done"]
+
+
  
