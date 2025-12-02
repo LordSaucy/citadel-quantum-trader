@@ -14,3 +14,4 @@ def reload_config():
 
     use_shadow_mode: true   # when true, bot logs signals but never sends orders
 
+scorer_mode: lightgbm   # or "linear" to fall back
