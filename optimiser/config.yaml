@@ -1,0 +1,33 @@
+# -------------------------------------------------
+# Optimiser hyper‑parameters
+# -------------------------------------------------
+population_size: 80
+generations: 30
+cxpb: 0.7          # crossover probability
+mutpb: 0.2         # mutation probability
+
+# -------------------------------------------------
+# Search space
+# -------------------------------------------------
+# 1️⃣  ATR‑stop multiplier (k) – same for every symbol, but the optimiser can also make it symbol‑specific later.
+k:
+  type: uniform
+  low: 1.0
+  high: 2.5
+
+# 2️⃣  Feature weights – one vector per regime (trend, range, high_vol)
+weights_trend:
+  type: dirichlet   # forces the weights to sum to 1 (nice for interpretability)
+  dim: 6            # number of enabled features (see FEATURES dict)
+weights_range:
+  type: dirichlet
+  dim: 6
+weights_high_vol:
+  type: dirichlet
+  dim: 6
+
+# 3️⃣  Signal threshold (minimum confluence score to trade)
+signal_threshold:
+  type: uniform
+  low: 0.2
+  high: 0.8
