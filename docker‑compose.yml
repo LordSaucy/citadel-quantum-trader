@@ -857,3 +857,34 @@ volumes:
   grafana_private_data:
   grafana_public_data:
 
+# -------------------------------------------------
+# 7️⃣ Loki – log storage
+# -------------------------------------------------
+loki:
+  image: grafana/loki:2.9.1
+  container_name: citadel-loki
+  command: -config.file=/etc/loki/local-config.yaml
+  ports:
+    - "3100:3100"          # only needed for Grafana; not exposed to the Internet
+  volumes:
+    - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+    - loki-data:/loki        # persistent storage for log chunks
+  restart: unless-stopped
+  networks:
+    - backend
+
+# -------------------------------------------------
+# 8️⃣ Promtail – log collector
+# -------------------------------------------------
+promtail:
+  image: grafana/promtail:2.9.1
+  container_name: citadel-promtail
+  command: -config.file=/etc/promtail/promtail.yaml
+  volumes:
+    - /var/log:/var/log:ro                 # host logs (Docker host + containers)
+    - ./promtail/promtail.yaml:/etc/promtail/promtail.yaml:ro
+    - /var/lib/docker/containers:/var/lib/docker/containers:ro   # needed for container logs
+    - /run/docker.sock:/run/docker.sock:ro                     # optional, for Docker API
+  restart: unless-stopped
+  networks:
+    - backend
