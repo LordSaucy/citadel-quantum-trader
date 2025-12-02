@@ -20,3 +20,9 @@ def build_scorer(cfg):
         (tree, cfg['scorer']['ensemble_weights']['tree']),
     ]
     return WeightedEnsemble(comps)
+    
+# In the ensemble builder (src/scorer/__init__.py)
+if posterior_variance.mean() > 0.02:
+    cfg['scorer']['ensemble_weights']['linear'] = 0.3   # give more room to tree
+else:
+    cfg['scorer']['ensemble_weights']['linear'] = 0.6
