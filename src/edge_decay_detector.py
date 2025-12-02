@@ -19,11 +19,72 @@ edge_decay_events_total = Counter(
     "Number of times edge‑decay detector tightened risk"
 )
 
+
 # Optional gauge to expose the *current* win‑rate (for Grafana)
 edge_decay_current_wr = Gauge(
     "edge_decay_current_winrate",
     "Rolling 200‑trade win‑rate used by edge‑decay detector"
 )
+
+WIN_RATE_FLOOR = 0.95          # 95 % over the last 200 trades
+RISK_MODIFIER = 0.5           # halve risk_fraction
+MODIFIER_TRADES = 10          # apply for the next N trades
+
+async def fetch_bucket_winrate(bucket_id: int, prometheus_url: str) -> float:
+    """Query Prometheus for the rolling 200‑trade win‑rate of a bucket."""
+    query = f"""
+    sum(increase(wins_total{{bucket_id="{bucket_id}"}}[200]))
+    /
+    sum(increase(trades_total{{bucket_id="{bucket_id}"}}[200]))
+    """
+    async with aiohttp.ClientSession() as s:
+        async with s.get(f"{prometheus_url}/api/v1/query", params={"query": query}) as r:
+            data = await r.json()
+            try:
+                return float(data["data"]["result"][0]["value"][1])
+            except (IndexError, KeyError):
+                return 1.0   # assume perfect if no data yet
+
+async def apply_temporary_modifier(bucket_id: int, conn):
+    """Write a temporary modifier row that expires after MODIFIER_TRADES."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO risk_modifier (bucket_id, multiplier, remaining_trades)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (bucket_id) DO UPDATE
+        SET multiplier = %s,
+            remaining_trades = %s;
+        """,
+        (bucket_id, RISK_MODIFIER, MODIFIER_TRADES,
+         RISK_MODIFIER, MODIFIER_TRADES)
+    )
+    conn.commit()
+
+async def decay_loop(prometheus_url: str, db_uri: str):
+    """Runs forever – checks every minute."""
+    while True:
+        async with aiohttp.ClientSession() as _:
+            # Get list of bucket IDs from DB
+            with psycopg2.connect(db_uri) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT DISTINCT bucket_id FROM trades")
+                bucket_ids = [row[0] for row in cur.fetchall()]
+
+                for bid in bucket_ids:
+                    winrate = await fetch_bucket_winrate(bid, prometheus_url)
+                    if winrate < WIN_RATE_FLOOR:
+                        # Edge‑decay triggered
+                        edge_decay_events_total.inc()
+                        apply_temporary_modifier(bid, conn)
+                        print(f"[{time.strftime('%X')}] Edge‑decay: bucket {bid} win‑rate {winrate:.2%} → risk halved")
+        await asyncio.sleep(60)   # run once per minute
+
+if __name__ == "__main__":
+    # Pull values from environment (same as other services)
+    PROM_URL = os.getenv("PROMETHEUS_URL", "http://prometheus:9090")
+    DB_URL   = os.getenv("DB_URI")
+    asyncio.run(decay_loop(PROM_URL, DB_URL))
 
 # -------------------------------------------------
 # Configuration (environment variables – easy to tune)
