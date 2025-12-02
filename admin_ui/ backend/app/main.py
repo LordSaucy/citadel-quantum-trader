@@ -6,6 +6,9 @@ from .config import load_config, save_config
 from .logs import stream_logs
 from .prometheus import query_drawdown
 import os
+from fastapi import Body
+from .triangular_arb_executor import execute_triangular_arb, ArbExecutionError
+
 
 app = FastAPI(title="Citadel Admin API", version="0.1.0")
 
@@ -97,4 +100,37 @@ async def reload_config(user=Depends(get_current_user)):
     from config_loader import Config
     Config()._load()
     return {"msg": "Configuration reloaded from config.yaml"}
+
+# -----------------------------------------------------------------
+@app.post("/arb/run")
+async def run_manual_arb(
+    payload: dict = Body(...),  # expects {"legs": [...], "gross_profit_pips": float}
+    user=Depends(get_current_user),
+):
+    """
+    Payload example:
+    {
+        "legs": [
+            {"symbol": "EURUSD", "side": "buy",  "volume": 0.01},
+            {"symbol": "USDJPY", "side": "sell", "volume": 0.01},
+            {"symbol": "EURJPY", "side": "sell", "volume": 0.01}
+        ],
+        "gross_profit_pips": 1.2
+    }
+    """
+    try:
+        await execute_triangular_arb(
+            broker=bot_control,  # reuse the same broker instance you use for live trading
+            legs=payload["legs"],
+            gross_profit_pips=payload["gross_profit_pips"],
+        )
+        # Increment success metric (already done inside executor)
+        return {"status": "success", "msg": "Arb executed successfully"}
+    except ArbExecutionError as exc:
+        # Increment guard‑hit metric (already done inside executor)
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+
 
