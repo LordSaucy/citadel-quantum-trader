@@ -194,3 +194,41 @@ secrets:
     external: true
   IBKR_SECRET:
     external: true
+
+    # -------------------------------------------------
+# 7️⃣ Admin UI – FastAPI backend + React SPA
+# -------------------------------------------------
+admin-backend:
+  build:
+    context: ./admin_ui/backend
+    dockerfile: Dockerfile
+  container_name: citadel-admin-backend
+  environment:
+    # Secret for simple JWT (change in production!)
+    - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET:-CHANGE_ME}
+    # URL of the bot‑control service (the FastAPI wrapper we wrote)
+    - BOT_CONTROL_URL=http://bot-control:8000
+    # Prometheus endpoint (used by the draw‑down helper)
+    - PROMETHEUS_URL=http://prometheus:9090
+  depends_on:
+    - bot-control
+    - prometheus
+  networks:
+    - backend
+  restart: unless-stopped
+
+admin-frontend:
+  build:
+    context: ./admin_ui/frontend
+    dockerfile: Dockerfile
+  container_name: citadel-admin-frontend
+  depends_on:
+    - admin-backend
+  networks:
+    - backend
+  restart: unless-stopped
+  # The front‑end only serves static files, so we expose port 80 internally.
+  # The outer Nginx (or the WireGuard‑only host) will expose it to the world.
+  expose:
+    - "80"
+ 
