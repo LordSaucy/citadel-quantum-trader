@@ -263,4 +263,20 @@ nginx-proxy:
   # (Docker defaults to SIGTERM, but you can be explicit)
   # stop_signal: SIGTERM
 
+  optimizer:
+  build: ./admin_ui/optimizer   # (or ./optimizer if you keep it separate)
+  container_name: citadel-optimizer
+  environment:
+    - OPT_WINDOW_DAYS=30
+  volumes:
+    - ./config:/app/config          # read/write the yaml files
+    - ./data:/app/data              # market data (parquet/CSV)
+    - ./optimizer/history:/opt/optimizer   # sqlite history DB
+  command: ["python", "run_opt.py"]
+  depends_on:
+    - citadel-db
+    - prometheus
+  restart: unless-stopped
+
+
  
