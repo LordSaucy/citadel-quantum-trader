@@ -382,5 +382,33 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
- 
+ name: Monte‑Carlo Risk Check
+on:
+  push:
+    paths:
+      - 'tools/**'
+      - 'src/**'          # if you change any model that affects WR/RR
+jobs:
+  mc-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          pip install -r tools/requirements.txt
+      - name: Run Monte‑Carlo (quick sanity check)
+        run: |
+          python tools/simulate_wr.py --paths 2000 --plot 0
+      - name: Upload results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mc-results
+          path: |
+            # the script prints to stdout; capture it
+            output.txt
+
 
