@@ -500,6 +500,23 @@ citadel-bot-control:
     - BUCKET_ID=99
     - USE_RISK_SCHEDULE=false         # <-- control bucket (constant 0.5 %)
   ...
+# -------------------------------------------------
+# 10️⃣ Loki – log aggregation & long‑term storage
+# -------------------------------------------------
+loki:
+  image: grafana/loki:2.9.5   # pick the latest stable tag
+  container_name: citadel-loki
+  command: -config.file=/etc/loki/local-config.yaml
+  volumes:
+    - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+    - loki-data:/var/lib/loki   # persistent volume (host‑backed)
+  restart: unless-stopped
+  networks:
+    - backend
+volumes:
+  pgdata:
+  grafana_data:
+  loki-data:          # <-- new
 
 
  
