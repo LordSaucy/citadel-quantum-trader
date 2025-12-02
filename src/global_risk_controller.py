@@ -1,5 +1,6 @@
 import time
 import psycopg2
+import os
 from config_loader import Config
 from prometheus_client import Gauge, start_http_server
 
