@@ -590,5 +590,8 @@ loki-exporter:
     - backend
   restart: "no"   # do NOT restart automatically
 
-
+services:
+  engine:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:${IMAGE_TAG:-latest}
+    # … the rest of your definition …
  
