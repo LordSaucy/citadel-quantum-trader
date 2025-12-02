@@ -945,3 +945,18 @@ services:
     volumes:
       - /var/log:/var/log:ro
       - ./promtail/prom
+
+      alertmanager:
+  image: prom/alertmanager:latest
+  container_name: alertmanager
+  volumes:
+    - ./monitoring/alertmanager.yml:/etc/alertmanager/config.yml:ro
+  command:
+    - '--config.file=/etc/alertmanager/config.yml'
+    - '--storage.path=/alertmanager'
+  ports:
+    - "9093:9093"
+  restart: unless-stopped
+  networks:
+    - backend
+
