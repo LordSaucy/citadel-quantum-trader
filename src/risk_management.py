@@ -664,3 +664,21 @@ class RiskManager:
         # Record the provisional exposure (will be finalized after the trade)
         self.update_symbol_exposure(symbol, stake)
         return stake
+
+TRAILING_FACTOR = cfg.get("trailing_factor", 0.30)   # 30 % of profit goes to reserve
+
+def record_trade_result(self, bucket_id: int, pnl_usd: float) -> None:
+    """Called after a trade finishes (win or loss)."""
+    # Update equity, reserve, and aggressive pool
+    bucket = self.get_bucket(bucket_id)
+
+    if pnl_usd > 0:                     # winning trade
+        lock_in = pnl_usd * TRAILING_FACTOR
+        bucket.reserve_pool += lock_in
+        bucket.aggressive_pool += (pnl_usd - lock_in)
+    else:                               # losing trade (loss already capped)
+        bucket.aggressive_pool += pnl_usd   # pnl_usd is negative
+
+    # Persist changes
+    self.db.update_bucket(bucket_id, bucket)
+
