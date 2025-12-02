@@ -191,4 +191,24 @@ groups:
     description: "PSI = {{ $value }} (> 0.25). Edge‑decay detector will tighten thresholds automatically."
 
 
+groups:
+- name: citadel.liquidity
+  rules:
+  - alert: LowMarketDepth
+    expr: bucket_market_depth < 5000   # adjust per‑symbol threshold
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Insufficient depth on bucket {{ $labels.bucket_id }}"
+      description: "Total depth < 5 k contracts – trades may slip."
+
+  - alert: ExtremeLiquidityImbalance
+    expr: abs(bucket_liquidity_imbalance_ratio) > 0.85
+    for: 30s
+    labels:
+      severity: info
+    annotations:
+      summary: "Very high LIR ({{ $value }}) on bucket {{ $labels.bucket_id }}"
+      description: "Market is heavily one‑sided; consider tightening risk‑fraction."
 
