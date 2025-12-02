@@ -600,4 +600,33 @@ services:
       BROKER_TYPE: "binance_futures"
       VAULT_SECRET_PATH: "secret/data/citadel/live_binance_futures"
       USE_OPTIMISED_CFG: "true"
+version: "3.9"
+services:
+  # -------------------------------------------------
+  # Existing services (vault, citadel‑bot, prometheus, grafana, etc.)
+  # -------------------------------------------------
+
+  # -------------------------------------------------
+  # OpenTelemetry Collector (OTel Contrib)
+  # -------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.106.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4318:4318"   # OTLP HTTP receiver (used by the bot)
+    depends_on:
+      - jaeger
+
+  # -------------------------------------------------
+  # Jaeger (all‑in‑one for dev)
+  # -------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    ports:
+      - "16686:16686"   # UI
+      - "14268:14268"   # HTTP collector (optional)
+    environment:
+      COLLECTOR_ZIPKIN_HTTP_PORT: 9411
 
