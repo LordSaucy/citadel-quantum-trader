@@ -1,0 +1,102 @@
+# --------------------------------------------------------------
+# Prometheus configuration for Citadel Quantum Trader (CQT)
+# --------------------------------------------------------------
+global:
+  # Default scrape interval for all jobs
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  # Optional: external labels – useful if you ever federate multiple
+  # Prometheus instances (e.g., across regions)
+  external_labels:
+    environment: production
+    project: citadel-quantum-trader
+
+# --------------------------------------------------------------
+# Alerting configuration (optional – you can point to an
+# Alertmanager instance if you have one)
+# --------------------------------------------------------------
+# alerting:
+#   alertmanagers:
+#   - static_configs:
+#     - targets:
+#       - cqt-alertmanager:9093   # replace with your Alertmanager host
+
+# --------------------------------------------------------------
+# Scrape configurations – each block defines a “job”
+# --------------------------------------------------------------
+scrape_configs:
+
+  # ----------------------------------------------------------------
+  # 1️⃣  CQT Engine metrics (exposed on port 8000 inside the engine)
+  # ----------------------------------------------------------------
+  - job_name: 'cqt_engine'
+    # The engine containers register their private DNS names automatically
+    # because they are on the same Docker network (cqt‑net) and VPC.
+    static_configs:
+      - targets:
+          - cqt-engine-primary.internal:8000
+          - cqt-engine-standby.internal:8000
+    metrics_path: /metrics
+    scheme: http
+    # If you ever enable basic auth on the engine metrics endpoint,
+    # uncomment and fill the block below:
+    # basic_auth:
+    #   username: prom_user
+    #   password: ${PROM_PASSWORD}
+
+  # ----------------------------------------------------------------
+  # 2️⃣  PostgreSQL exporter (runs inside the DB droplet)
+  # ----------------------------------------------------------------
+  - job_name: 'postgres_exporter'
+    static_configs:
+      - targets:
+          - cqt-db.internal:9187   # default port for postgres_exporter
+    metrics_path: /metrics
+    scheme: http
+
+  # ----------------------------------------------------------------
+  # 3️⃣  Node exporter (system metrics for the monitor droplet)
+  # ----------------------------------------------------------------
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets:
+          - cqt-monitor.internal:9100
+    metrics_path: /metrics
+    scheme: http
+
+  # ----------------------------------------------------------------
+  # 4️⃣  Optional: Custom application health checks (via blackbox exporter)
+  # ----------------------------------------------------------------
+  # If you want Prometheus to actively probe the public Load‑Balancer
+  # endpoint (HTTPS) you can enable the blackbox exporter and add a job
+  # like the one below.  First, make sure the blackbox exporter container
+  # is running and reachable at `cqt-blackbox:9115`.
+  #
+  # - job_name: 'blackbox_http'
+  #   metrics_path: /probe
+  #   params:
+  #     module: [http_2xx]   # uses the built‑in http_2xx module
+  #   static_configs:
+  #     - targets:
+  #         - https://api.cqt.example.com   # public LB URL
+  #   relabel_configs:
+  #     - source_labels: [__address__]
+  #       target_label: __param_target
+  #     - source_labels: [__param_target]
+  #       target_label: instance
+  #     - target_label: __address__
+  #       replacement: cqt-blackbox:9115   # blackbox exporter address
+
+# --------------------------------------------------------------
+# Rule files – separate file(s) that contain alerting rules.
+# --------------------------------------------------------------
+rule_files:
+  - /etc/prometheus/alert_rules.yml   # path inside the container (mounted)
+
+# --------------------------------------------------------------
+# Remote write / remote read (optional – for long‑term storage)
+# --------------------------------------------------------------
+# remote_write:
+#   - url: "http://cortex:9009/api/v1/push"
+# remote_read:
+#   - url: "http://cortex:9009/api/v1/read"
