@@ -59,3 +59,18 @@ receivers:
         parse_mode: Markdown
         disable_notification: false
         send_resolved: true
+
+
+receivers:
+  - name: slack
+    slack_configs:
+      - api_url: '{{ file "/etc/alertmanager/slack_webhook" }}'
+        ...
+  - name: pagerduty
+    pagerduty_configs:
+      - service_key: '{{ file "/etc/alertmanager/pagerduty_key" }}'
+        ...
+  - name: telegram
+    telegram_configs:
+      - bot_token: '{{ file "/etc/alertmanager/telegram_token" }}'
+        ...
