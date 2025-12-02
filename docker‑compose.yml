@@ -278,5 +278,24 @@ nginx-proxy:
     - prometheus
   restart: unless-stopped
 
+ # -------------------------------------------------
+  # 10️⃣ Optimiser – runs the GA/Bayesian optimiser
+  # -------------------------------------------------
+  optimiser:
+    image: citadel/optimiser:latest
+    container_name: citadel-optimiser
+    environment:
+      # Path where the bot expects the config (shared volume)
+      - CONFIG_DIR=/app/config
+      # Optional: limit runtime (e.g., 2 h) to avoid runaway loops
+      - RUN_INTERVAL=86400   # seconds (24 h). Set to 0 for “run once then exit”.
+    volumes:
+      - ./config:/app/config:rw   # shared with the bot – writable
+    depends_on:
+      - citadel-bot   # ensures the bot is up (optimiser can read metrics)
+    networks:
+      - backend
+    restart: unless-stopped
+
 
  
