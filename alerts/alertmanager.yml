@@ -169,3 +169,10 @@ groups:
         annotations:
           summary: "Liquidity vacuum detected"
           description: "LIR > {{ $labels.threshold }} or depth below {{ $labels.min_depth }}."
+
+          receivers:
+  - name: kill-switch
+    webhook_configs:
+      - url: http://citadel-bot:8000/api/v1/kill_switch   # internal network address
+        send_resolved: true
+
