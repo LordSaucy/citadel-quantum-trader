@@ -699,3 +699,17 @@ def compute_stake(self, bucket_id: int, equity: float, symbol: str, lir: float) 
     # Enforce per‑symbol ceiling afterwards (see section 2)
     stake = equity * effective_frac
     return stake
+
+import asyncio
+from src.telemetry import trace
+
+async def risk_manager(signal_queue, execution_queue):
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_as_current_span("risk_manager"):
+        while True:
+            signal = await signal_queue.get()
+            with tracer.start_as_current_span("apply_risk_rules"):
+                # Existing risk‑checking logic
+                if passes_risk(signal):
+                    await execution_queue.put(signal)
+
