@@ -69,3 +69,20 @@ guard_atr = Gauge("guard_atr",
 guard_lir = Gauge("guard_liquidity_imbalance_ratio",
                   "Liquidity‑Imbalance Ratio (LIR) for the current signal")
 
+regime_match_total = Counter(
+    "regime_match_total",
+    "Number of times a live regime matched a historical cluster"
+)
+
+regime_mismatch_total = Counter(
+    "regime_mismatch_total",
+    "Number of times a live regime failed to match any allowed cluster"
+)
+
+def record_regime_match(matched: bool):
+    if matched:
+        regime_match_total.inc()
+    else:
+        regime_mismatch_total.inc()
+
+
