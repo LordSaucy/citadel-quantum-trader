@@ -1,0 +1,130 @@
+# ------------------------------------------------------------
+# CQT – Prometheus Alert Rules
+# ------------------------------------------------------------
+# This file is mounted into the Prometheus container
+# (see `monitoring/prometheus.yml` → `rule_files:`).
+# ------------------------------------------------------------
+
+groups:
+  - name: cqt_general_alerts
+    rules:
+
+      # -----------------------------------------------------------------
+      # 1️⃣  Kill‑Switch activation (critical)
+      # -----------------------------------------------------------------
+      - alert: KillSwitchActive
+        expr: cqt_kill_switch_active == 1
+        for: 30s                     # stay active for at least 30 s before firing
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kill‑switch triggered on {{ $labels.instance }}"
+          description: |
+            The CQT risk‑engine has entered a kill‑switch state.
+            Reason: {{ $labels.reason | default "unspecified" }}.
+            Immediate investigation required – trading is paused.
+
+      # -----------------------------------------------------------------
+      # 2️⃣  Dynamic risk fraction too high (warning)
+      # -----------------------------------------------------------------
+      - alert: HighDynamicRisk
+        expr: cqt_dynamic_risk_fraction > 0.9
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dynamic risk fraction > 90 % on {{ $labels.instance }}"
+          description: |
+            The current dynamic‑risk factor (based on AOI/SMC weighting) is
+            above the safe threshold. Consider reviewing the weight
+            configuration or pausing new entries.
+
+      # -----------------------------------------------------------------
+      # 3️⃣  Draw‑down approaching limit (warning)
+      # -----------------------------------------------------------------
+      - alert: ApproachingDrawdownLimit
+        expr: cqt_drawdown_percent > 0.025   # 2.5 % (adjust to your policy)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Draw‑down {{ printf \"%.2f\" $value }} % on {{ $labels.instance }}"
+          description: |
+            The equity draw‑down is nearing the configured daily limit.
+            Review open positions and consider tightening risk parameters.
+
+      # -----------------------------------------------------------------
+      # 4️⃣  CPU usage high on any CQT component (warning)
+      # -----------------------------------------------------------------
+      - alert: HighCPUUsage
+        expr: avg by (instance) (rate(process_cpu_seconds_total[1m])) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU usage > 80 % on {{ $labels.instance }}"
+          description: |
+            Sustained high CPU may indicate a processing bottleneck.
+            Check the AOI/SMC calculations or consider scaling up.
+
+      # -----------------------------------------------------------------
+      # 5️⃣  Disk usage on the PostgreSQL volume (critical)
+      # -----------------------------------------------------------------
+      - alert: PostgresDiskFull
+        expr: (node_filesystem_size_bytes{mountpoint="/var/lib/postgresql"} -
+              node_filesystem_free_bytes{mountpoint="/var/lib/postgresql"}) /
+              node_filesystem_size_bytes{mountpoint="/var/lib/postgresql"} > 0.80
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL disk > 80 % used on {{ $labels.instance }}"
+          description: |
+            The TimescaleDB data volume is filling up.
+            Expand the block‑storage size or clean old partitions.
+
+      # -----------------------------------------------------------------
+      # 6️⃣  DB connection health (critical)
+      # -----------------------------------------------------------------
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is down on {{ $labels.instance }}"
+          description: |
+            Prometheus cannot scrape the PostgreSQL exporter.
+            Verify the DB container is running and network ACLs allow port 5432.
+
+      # -----------------------------------------------------------------
+      # 7️⃣  Prometheus target scrape failures (warning)
+      # -----------------------------------------------------------------
+      - alert: ScrapeFailure
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Target {{ $labels.job }} on {{ $labels.instance }} is down"
+          description: |
+            Prometheus failed to scrape the target for >2 minutes.
+            Investigate the service health or network connectivity.
+
+      # -----------------------------------------------------------------
+      # 8️⃣  Alertmanager dead‑letter queue (critical)
+      # -----------------------------------------------------------------
+      - alert: AlertmanagerDeadLetterQueue
+        expr: alertmanager_notifications_failed_total > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alertmanager failed to deliver notifications"
+          description: |
+            One or more alerts could not be sent (SMTP/Slack/Webhook).
+            Check Alertmanager configuration and downstream integrations.
+
+# ------------------------------------------------------------
+# End of file
+# ------------------------------------------------------------
