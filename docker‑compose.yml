@@ -445,4 +445,17 @@ volumes:
   grafana_data: {}
   # Add any additional named volumes you require here
 
+  citadel-bot:
+  image: citadel/trader:latest
+  depends_on:
+    - citadel-db
+  environment:
+    - BUCKET_ID=${BUCKET_ID:-1}
+    - VAULT_ADDR=https://vault.example.com
+    - VAULT_ROLE=citadel-app
+  ports:
+    - "8000"                 # health / metrics endpoint (internal only)
+  restart: unless-stopped    # <‑‑ THIS IS THE KEY line
+
+
  
