@@ -18,6 +18,8 @@ from typing import Dict, List, Optional
 from .utils import dict_hash
 from .config_loader import Config
 import boto3
+from prometheus_client import Gauge
+
 
 # ----------------------------------------------------------------------
 # Logging configuration (writes to ./logs/trade_logger.log)
