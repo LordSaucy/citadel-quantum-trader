@@ -1,3 +1,34 @@
+import MetaTrader5 as mt5
+
+class MT5Adapter(BrokerInterface):
+    # ...
+
+    def ping(self):
+        if not mt5.initialize():
+            raise RuntimeError("MT5 ping failed – cannot connect")
+
+    def get_market_depth(self, symbol, depth=20):
+        # MT5 provides a depth‑of‑market request
+        depth_info = mt5.market_book_get(symbol)
+        if depth_info is None:
+            return []
+        # Convert to the generic dict format expected by the guard
+        result = []
+        for level in depth_info:
+            result.append({
+                "side": "bid" if level.type == mt5.MARKET_BOOK_TYPE_BID else "ask",
+                "price": level.price,
+                "bid_volume": level.volume if level.type == mt5.MARKET_BOOK_TYPE_BID else 0,
+                "ask_volume": level.volume if level.type == mt5.MARKET_BOOK_TYPE_ASK else 0,
+            })
+        return result[:depth]
+
+    def get_quote(self, symbol):
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            raise RuntimeError(f"No tick for {symbol}")
+        return {"bid": tick.bid, "ask": tick.ask}
+ 
 def get_market_depth(self, symbol: str, depth: int = 30) -> List[Dict]:
     # MT5 provides depth via MarketBookGet(symbol, depth)
     # The API returns a list of tuples (price, volume, type)
