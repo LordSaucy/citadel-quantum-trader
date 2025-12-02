@@ -16,6 +16,14 @@ from regime_ensemble import match_regime, current_regime_vector
 from garch_vol import forecast_vol   # you already have a GARCH helper
 import asyncio
 from src.telemetry import trace
+import os
+import json
+import time
+import logging
+from pathlib import Path
+
+from prometheus_client import Counter, Gauge
+
 
 
 from .guard_helpers import (
@@ -642,3 +650,130 @@ async def execution_engine(execution_queue):
             with tracer.start_as_current_span("send_order"):
                 # Existing order‑submission code (MT5 API, etc.)
                 await send_order_to_broker(signal)
+
+log = logging.getLogger(__name__)
+
+class AdvancedExecutionEngine:
+    def __init__(self, shadow_mode: bool = False):
+        self.shadow_mode = shadow_mode
+        # Load credentials from Vault (unchanged)
+        self._load_credentials()
+        # Initialise Prometheus metrics (shared with paper‑trading)
+        self.order_counter = Counter(
+            "cqt_orders_total",
+            "Total number of orders the engine would have sent",
+            ["symbol", "direction", "shadow"]
+        )
+        self.latency_gauge = Gauge(
+            "cqt_order_latency_seconds",
+            "Round‑trip latency of order preparation (seconds)",
+            ["symbol", "shadow"]
+        )
+        self.slippage_gauge = Gauge(
+            "cqt_order_slippage_pips",
+            "Absolute slippage of the would‑be fill (pips)",
+            ["symbol", "shadow"]
+        )
+        # Shadow log file (rotated daily by systemd/journald if you like)
+        self.shadow_log_path = Path("/var/log/cqt/shadow.log")
+        self.shadow_log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # -----------------------------------------------------------------
+    # Public API used by the bot
+    # -----------------------------------------------------------------
+    def send_order(self, order):
+        """
+        `order` is a dict with at least:
+        - symbol
+        - direction ("BUY"/"SELL")
+        - price (requested price)
+        - volume
+        - stop_loss, take_profit
+        """
+        start = time.time()
+
+        # -----------------------------------------------------------------
+        # 1️⃣  Build the payload that would be sent to the broker
+        # -----------------------------------------------------------------
+        payload = {
+            "symbol": order["symbol"],
+            "direction": order["direction"],
+            "price": order["price"],
+            "volume": order["volume"],
+            "stop_loss": order["stop_loss"],
+            "take_profit": order["take_profit"],
+        }
+
+        # -----------------------------------------------------------------
+        # 2️⃣  If we are in SHADOW mode, **don’t call the broker**.
+        # -----------------------------------------------------------------
+        if self.shadow_mode:
+            # Simulate a “fill” price – we use the requested price plus a tiny
+            # random jitter to mimic market movement (you can make this more
+            # sophisticated if you wish).
+            import random
+            jitter = random.uniform(-0.0005, 0.0005)   # ±0.5 pip for FX
+            fill_price = order["price"] + jitter
+
+            # Compute slippage in pips (absolute)
+            pip_size = self._pip_size(order["symbol"])
+            slippage = abs(fill_price - order["price"]) / pip_size
+
+            # Record metrics
+            latency = time.time() - start
+            self.latency_gauge.labels(symbol=order["symbol"], shadow="yes").set(latency)
+            self.slippage_gauge.labels(symbol=order["symbol"], shadow="yes").set(slippage)
+            self.order_counter.labels(symbol=order["symbol"],
+                                      direction=order["direction"],
+                                      shadow="yes").inc()
+
+            # Write a structured JSON line to the shadow log
+            log_entry = {
+                "timestamp": time.time(),
+                "symbol": order["symbol"],
+                "direction": order["direction"],
+                "requested_price": order["price"],
+                "fill_price": round(fill_price, 5),
+                "volume": order["volume"],
+                "slippage_pips": round(slippage, 3),
+                "latency_seconds": round(latency, 4),
+                "note": "SHADOW – order NOT sent to broker"
+            }
+            with self.shadow_log_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
+
+            log.debug(f"🕶️  Shadow order logged: {log_entry}")
+            # Return a *fake* success response that mimics the real broker API
+            return {
+                "success": True,
+                "fill_price": fill_price,
+                "order_id": f"shadow-{int(time.time()*1000)}",
+                "reason": "shadow"
+            }
+
+        # -----------------------------------------------------------------
+        # 3️⃣  REAL‑MODE – call the broker (unchanged from your existing code)
+        # -----------------------------------------------------------------
+        # Example for MT5 – replace with your actual implementation
+        response = self._mt5_send_order(payload)   # <-- existing low‑level call
+        latency = time.time() - start
+        self.latency_gauge.labels(symbol=order["symbol"], shadow="no").set(latency)
+        self.order_counter.labels(symbol=order["symbol"],
+                                  direction=order["direction"],
+                                  shadow="no").inc()
+
+        # Compute slippage if the broker returns a fill price
+        if response.get("fill_price"):
+            pip_size = self._pip_size(order["symbol"])
+            slippage = abs(response["fill_price"] - order["price"]) / pip_size
+            self.slippage_gauge.labels(symbol=order["symbol"], shadow="no").set(slippage)
+
+        return response
+
+    # -----------------------------------------------------------------
+    # Helper – pip size per symbol (same as in costs module)
+    # -----------------------------------------------------------------
+    def _pip_size(self, symbol: str) -> float:
+        from .metrics import PIP_VALUE   # already in your repo
+        return PIP_VALUE.get(symbol, 0.0001)
+
