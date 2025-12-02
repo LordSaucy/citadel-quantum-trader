@@ -348,5 +348,20 @@ alertmanager:
   environment:
     - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
 
+     global-risk-controller:
+    build:
+      context: ./admin_ui/global_risk_controller
+      dockerfile: Dockerfile
+    container_name: citadel-global-risk
+    environment:
+      - DB_URI=postgresql://citadel:${POSTGRES_PASSWORD}@citadel-db:5432/citadel
+      - MAX_GLOBAL_RISK=0.05
+    depends_on:
+      - citadel-db
+    networks:
+      - backend
+    restart: unless-stopped
+
+
 
  
