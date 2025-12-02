@@ -126,4 +126,10 @@ RUN pip install matplotlib seaborn
 COPY migrations/2025-11-30_add_aggressive_pool.sql /docker-entrypoint-initdb.d/
 
 
-
+FROM python:3.11-slim AS base
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY simulate_wr.py .
+ENTRYPOINT ["python", "/app/simulate_wr.py"]
+ 
