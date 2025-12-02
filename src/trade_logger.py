@@ -15,6 +15,9 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+from .utils import dict_hash
+from .config_loader import Config
+import boto3
 
 # ----------------------------------------------------------------------
 # Logging configuration (writes to ./logs/trade_logger.log)
@@ -455,3 +458,20 @@ class TradeLogger:
     def __del__(self):
         """Ensure the DB is closed when the object is garbage‑collected."""
         self.close()
+
+class TradeLogger:
+    # ... existing methods ...
+
+    def log_depth_check(self, bucket_id: int, symbol: str,
+                        depth_ok: bool, agg_bid: float, agg_ask: float):
+        entry = {
+            "event": "depth_check",
+            "bucket_id": bucket_id,
+            "symbol": symbol,
+            "depth_ok": depth_ok,
+            "agg_bid_volume": agg_bid,
+            "agg_ask_volume": agg_ask,
+            "ts": datetime.utcnow().isoformat(),
+        }
+        self._store_entry(entry)   # same Merkle‑hash pipeline as other events
+
