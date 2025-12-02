@@ -223,3 +223,16 @@ groups:
       summary: "Average 30‑day correlation > 0.65"
       description: "Risk caps have been automatically tightened. Review the risk‑fraction schedule if needed."
 
+groups:
+  - name: latency-alerts
+    rules:
+      - alert: HighLatencyDetected
+        expr: avg_over_time(order_latency_seconds[30s]) > 0.2   # 200 ms
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Order latency > 200 ms for 30 s"
+          description: "Latency spike detected – kill‑switch will be activated."
+
+
