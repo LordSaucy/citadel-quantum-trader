@@ -109,3 +109,7 @@ class AdvancedExecutionEngine:
         else:
             logger.error("Broker rejected order %s %s", side, symbol)
             return {"executed": False, "reason": "broker rejection"}
+
+new_equity = self.account.get_equity()   # whatever method you have
+self.risk_manager.calculate_usable_capital(bucket_id=self.bucket_id,
+                                            equity=new_equity)
