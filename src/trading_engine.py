@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import logging
 from typing import Dict
+from model_registry import ModelRegistry
+
 
 from .config_loader import load_config          # your existing config helper
 from .feature_extractor import extract_features
@@ -43,3 +45,14 @@ def process_bar(bar: Dict) -> None:
         # place_order(direction, bar, ...)
 
     # else: do nothing – signal too weak
+
+registry = ModelRegistry()
+
+def generate_signal(feature_vec: dict) -> bool:
+    # Existing SMC / 7‑lever logic …
+    # …
+    # Finally combine with the meta‑model vote:
+    meta_signal = registry.vote(feature_vec)
+    # You can decide to **AND** the two signals (conservative) or **OR** (aggressive)
+    return meta_signal and smc_signal   # conservative default
+
