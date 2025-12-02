@@ -248,9 +248,11 @@ nginx-proxy:
     - grafana-private
     - grafana-public
     - admin-frontend
+    - admin-backend
   networks:
     - backend
   restart: unless-stopped
+
  citadel-bot:
   ...
   volumes:
