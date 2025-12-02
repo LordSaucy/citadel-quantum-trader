@@ -4,6 +4,9 @@ from typing import Tuple, Optional
 
 from .config import logger, env
 from prometheus_client import Gauge
+import logging
+from datetime import datetime, timedelta
+
 
 # ----------------------------------------------------------------------
 # Prometheus gauges (exported automatically by the Flask entrypoint)
@@ -24,6 +27,12 @@ MAX_OPEN_POSITIONS = env("MAX_OPEN_POSITIONS", 4, int)
 DAILY_DD_LIMIT_PCT = env("DAILY_DD_LIMIT_PCT", 3.0, float)   # % draw‑down before kill‑switch
 WEEKLY_DD_LIMIT_PCT = env("WEEKLY_DD_LIMIT_PCT", 8.0, float)
 
+logger = logging.getLogger(__name__)
+
+# Configurable (move to config.yaml later)
+DRAW_DOWN_TRIGGER = 0.10   # 10 % of current equity
+RECENT_HIGH_WINDOW = timedelta(hours=1)   # look‑back window for the “high”
+
 # ----------------------------------------------------------------------
 class RiskManagementLayer:
     """
@@ -32,11 +41,41 @@ class RiskManagementLayer:
     before every order is sent to the broker.
     """
 
-    def __init__(self) -> None:
+       def __init__(self, db):
+        self.db = db
+        self.last_peak = None   # highest equity seen in RECENT_HIGH_WINDOW
+
         self._kill_switch_active: bool = False
         self._kill_reason: Optional[str] = None
         self._last_reset: datetime = datetime.utcnow()
         logger.info("RiskManagementLayer initialised")
+
+ def _update_peak(self, equity: float):
+        now = datetime.utcnow()
+        if self.last_peak is None or equity > self.last_peak[1]:
+            self.last_peak = (now, equity)
+
+        # Forget peaks older than the window
+        if self.last_peak and now - self.last_peak[0] > RECENT_HIGH_WINDOW:
+            self.last_peak = None
+
+    def check_dynamic_kill_switch(self, equity: float) -> bool:
+        """
+        Returns True if the draw‑down from the recent high exceeds
+        DRAW_DOWN_TRIGGER. If True, the caller should pause new entries.
+        """
+        self._update_peak(equity)
+
+        if not self.last_peak:
+            return False
+
+        peak_equity = self.last_peak[1]
+        drawdown = (peak_equity - equity) / peak_equity
+        if drawdown >= DRAW_DOWN_TRIGGER:
+            logger.warning(
+                f"Dynamic kill‑switch triggered: draw‑down {drawdown:.2%} "
+                f"exceeds {DRAW_DOWN_TRIGGER:.2%} (peak={peak_equity:.2f}, cur={equity:.2f})"
+            )
 
     # --------------------------------------------------------------
     # Public API ---------------------------------------------------
