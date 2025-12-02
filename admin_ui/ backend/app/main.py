@@ -145,4 +145,27 @@ async def toggle_schedule(bucket_id: int, enabled: bool, user=Depends(get_curren
     set_bucket_flag(bucket_id, enabled)   # writes to Redis or a DB table
     return {"bucket_id": bucket_id, "schedule_enabled": enabled}
 
+from fastapi import BackgroundTasks
+from src.drift_monitor import run_drift_check
+import pandas as pd
+
+@app.post("/drift/run")
+async def trigger_drift(background: BackgroundTasks,
+                        user=Depends(get_current_user)):
+    """
+    Pull the latest feature dataframe from the DB (or a CSV) and run the
+    drift calculation in the background. Returns immediately.
+    """
+    # Example: read the latest 24‑h of feature data from PostgreSQL
+    # (you already have a DB connection in risk_management_layer)
+    async def _task():
+        # Replace with your actual query – here we just mock a DataFrame
+        # df = pd.read_sql("SELECT * FROM feature_store WHERE ts >= now() - interval '1 day'", conn)
+        df = pd.DataFrame()  # TODO: implement real fetch
+        if not df.empty:
+            run_drift_check(df)
+
+    background.add_task(_task)
+    return {"msg": "Drift check scheduled"}
+
 
