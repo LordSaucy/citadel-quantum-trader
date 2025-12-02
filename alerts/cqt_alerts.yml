@@ -172,4 +172,23 @@ groups:
         labels:
           severity:
 
+          - alert: FeatureDriftModerate
+  expr: max by (feature) (feature_psi_*) > 0.1
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Feature {{ $labels.feature }} shows moderate PSI drift"
+    description: "PSI = {{ $value }} (> 0.1). Consider retraining or pausing the bot."
+
+- alert: FeatureDriftSevere
+  expr: max by (feature) (feature_psi_*) > 0.25
+  for: 1m
+  labels:
+    severity: critical
+  annotations:
+    summary: "Feature {{ $labels.feature }} shows severe PSI drift"
+    description: "PSI = {{ $value }} (> 0.25). Edge‑decay detector will tighten thresholds automatically."
+
+
 
