@@ -123,5 +123,35 @@ groups:
           description: "The bot has lost {{ $value }} trades in a row on bucket {{ $labels.bucket_id }}. Consider pausing or investigating the market regime."
 
 
+groups:
+  - name: shock-detector-alerts
+    interval: 1m
+    rules:
+      - alert: HighNewsSentimentBlocking
+        expr: sum(rate(trade_blocked_total{reason="news_sentiment"}[5m])) > 2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "News‑sentiment blocker > 2 trades/5 min"
+          description: "The sentiment guard is blocking trades – check the news‑sentiment pipeline."
+
+      - alert: VolatilitySpikeBlocking
+        expr: sum(rate(trade_blocked_total{reason="vol_spike"}[5m])) > 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Volatility‑spike blocker active"
+          description: "ATR exceeded the configured multiplier – trades are being blocked."
+
+      - alert: MacroEventBlocking
+        expr: sum(rate(trade_blocked_total{reason="macro_event"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "Macro‑event window active"
+          description: "A high‑impact macro event is ongoing; trading is paused."
 
 
