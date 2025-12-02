@@ -319,6 +319,12 @@ optimiser:
 
   CMD ["sh", "-c", "while true; do python run_opt.py; sleep ${RUN_INTERVAL:-86400}; done"]
 
+services:
+  pushgateway:
+    image: prom/pushgateway:latest
+    ports:
+      - "9091:9091"
+    restart: unless-stopped
 
 
 
