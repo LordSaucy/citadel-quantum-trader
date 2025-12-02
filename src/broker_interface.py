@@ -1,4 +1,9 @@
 # broker_interface.py
+
+# src/broker_interface.py (excerpt)
+from abc import ABC, abstractmethod
+from typing import List, Dict
+
 class BrokerInterface(ABC):
     ...
     @abstractmethod
@@ -37,3 +42,18 @@ class BrokerInterface(ABC):
         The concrete implementation must fire a websocket / callback when the order
         is fully filled, partially filled or rejected."""
         ...
+
+    # Existing abstract methods ...
+
+    @abstractmethod
+    def ping(self) -> None:
+        """Lightweight health‑check; raise on failure."""
+
+    @abstractmethod
+    def get_market_depth(self, symbol: str, depth: int = 20) -> List[Dict]:
+        """Return a list of depth entries:
+           [{'side':'bid','price':..., 'bid_volume':..., 'ask_volume':...}, ...]"""
+
+    @abstractmethod
+    def get_quote(self, symbol: str) -> Dict:
+        """Return {'bid': float, 'ask': float} for the symbol."""
