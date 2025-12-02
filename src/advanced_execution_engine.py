@@ -4,6 +4,9 @@ from typing import Dict, Any
 from .config import logger
 from .risk_management import RiskManagementLayer
 from prometheus_client import Histogram, Counter
+from smc import SMCEngine
+engine = SMCEngine()          # created at start‑up
+
 
 # ----------------------------------------------------------------------
 # Stubbed broker adapters – replace with real MT5 / IBKR SDK calls
@@ -21,6 +24,16 @@ order_price_slippage = Counter(
     "Absolute price difference between submitted price and fill price (pips)",
     ["symbol", "side"],
 )
+
+def _watch_config(self):
+    # existing file‑watch loop …
+    if mtime != last_mtime:
+        # reload the whole config dict
+        cfg = Config().settings
+        # propagate to SMC
+        engine.refresh_params()
+        last_mtime = mtime
+
 class MT5Gateway:
     def __init__(self, host: str, login: str, password: str):
         self.host = host
