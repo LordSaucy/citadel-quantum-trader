@@ -687,3 +687,15 @@ allowed = position_stacking_manager.max_allowed_stacks(symbol, symbol_atr)
 if current_stacks >= allowed:
     raise RuntimeError(f"Stack limit reached for {symbol} (max {allowed})")
 
+from liquidity_risk_scaler import lira_adjusted_risk
+
+def compute_stake(self, bucket_id: int, equity: float, symbol: str, lir: float) -> float:
+    trade_idx = self.get_trade_counter(bucket_id) + 1
+    base_frac = self.schedule.get(trade_idx, self.schedule.get("default"))
+
+    # ---- Liquidity‑aware scaling ----
+    effective_frac = lira_adjusted_risk(base_frac, lir)
+
+    # Enforce per‑symbol ceiling afterwards (see section 2)
+    stake = equity * effective_frac
+    return stake
