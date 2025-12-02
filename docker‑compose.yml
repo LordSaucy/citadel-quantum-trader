@@ -630,3 +630,11 @@ services:
     environment:
       COLLECTOR_ZIPKIN_HTTP_PORT: 9411
 
+ correlation-exporter:
+    image: python:3.11-slim
+    volumes:
+      - ./src:/opt/cqt/src:ro
+    command: ["python", "/opt/cqt/src/correlation_exporter.py"]
+    depends_on:
+      - citadel-db
+    restart: unless-stopped
