@@ -727,4 +727,133 @@ nginx-proxy:
   networks:
     - backend
 
+services:
+  # -------------------------------------------------
+  # Existing services (PostgreSQL, Prometheus, Grafana, Bot, etc.)
+  # -------------------------------------------------
+  citadel-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: citadel
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: citadel
+    secrets:
+      - db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - backend
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+    networks:
+      - backend
+
+  grafana-private:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana_admin_pwd
+    secrets:
+      - grafana_admin_pwd
+    volumes:
+      - grafana_private_data:/var/lib/grafana
+      - ./dashboards:/var/lib/grafana/dashboards
+    restart: unless-stopped
+    networks:
+      - backend
+
+  grafana-public:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - grafana_public_data:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - backend
+
+  citadel-bot:
+    image: citadel/trader:latest
+    depends_on:
+      - citadel-db
+    environment:
+      - BUCKET_ID=1
+      - VAULT_ADDR=https://vault.example.com
+      - VAULT_ROLE=citadel-app
+    ports:
+      - "8000"   # health / metrics (internal only)
+    restart: unless-stopped
+    networks:
+      - backend
+
+  bot-control:
+    image: ghcr.io/yourorg/citadel-qt/bot-control:latest
+    environment:
+      - CONTROL_API_KEY=${CONTROL_API_KEY}
+    ports:
+      - "8001:8000"
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # -------------------------------------------------
+  # 7️⃣ Admin UI – FastAPI backend
+  # -------------------------------------------------
+  admin-backend:
+    image: ghcr.io/yourorg/citadel-qt/admin-backend:latest
+    environment:
+      - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET}
+      - BOT_CONTROL_URL=http://bot-control:8000
+      - PROMETHEUS_URL=http://prometheus:9090
+    depends_on:
+      - bot-control
+      - prometheus
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # -------------------------------------------------
+  # 8️⃣ Admin UI – React front‑end
+  # -------------------------------------------------
+  admin-frontend:
+    image: ghcr.io/yourorg/citadel-qt/admin-frontend:latest
+    depends_on:
+      - admin-backend
+    expose:
+      - "80"
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # -------------------------------------------------
+  # 9️⃣ Nginx reverse‑proxy (TLS termination)
+  # -------------------------------------------------
+  nginx-proxy:
+    image: nginx:alpine
+    container_name: citadel-nginx-proxy
+    ports:
+      - "443:443"
+    depends_on:
+      - grafana-public
+      - prometheus
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - backend
+    restart: unless-stopped
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  pgdata:
+  grafana_private_data:
+  grafana_public_data:
 
