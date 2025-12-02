@@ -437,4 +437,40 @@ atr_stop_gauge = Gauge('cqt_atr_stop', 'ATR‑scaled stop price (USD)')
 feat_df = signal_engine.compute_features(df)
 vwap_gauge.set(feat_df['vwap_bias'].iloc[-1])
 atr_stop_gauge.set(feat_df['atr_stop'].iloc[-1])
+from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+router = APIRouter()
+auth_scheme = HTTPBearer()   # reuse the same JWT/Okta auth you already have
+
+# -----------------------------------------------------------------
+# TEST ONLY – accepts any payload, pretends to place an order
+# -----------------------------------------------------------------
+@router.post("/test-order", dependencies=[Depends(auth_scheme)])
+async def test_order(payload: dict = Body(...)):
+    """
+    *Used by Locust only.*  The function pretends to send an order,
+    updates the Prometheus counters (order_total, order_success_total,
+    order_reject_total) and returns a fake response.
+    """
+    # Very naive validation – you can make it stricter if you like
+    symbol = payload.get("symbol", "")
+    volume = payload.get("volume", 0)
+
+    # Increment total counter
+    order_total.inc()
+
+    # Simulate success / reject logic
+    if symbol == "INVALID" or volume <= 0:
+        order_reject_total.inc()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rejected (invalid symbol/volume)",
+        )
+
+    # Simulate a tiny processing delay (to make latency measurable)
+    await asyncio.sleep(random.uniform(0.01, 0.05))
+
+    order_success_total.inc()
+    return {"status": "accepted", "order_id": uuid.uuid4().hex}
 
