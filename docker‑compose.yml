@@ -594,4 +594,10 @@ services:
   engine:
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:${IMAGE_TAG:-latest}
     # … the rest of your definition …
- 
+ services:
+  citadel-bot:
+    environment:
+      BROKER_TYPE: "binance_futures"
+      VAULT_SECRET_PATH: "secret/data/citadel/live_binance_futures"
+      USE_OPTIMISED_CFG: "true"
+
