@@ -31,6 +31,7 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Sequence, Tuple, Union
+from .main import app   # re‑export for uvicorn
 
 # ----------------------------------------------------------------------
 # Third‑party
