@@ -231,6 +231,18 @@ PARAM_KEYS = [
     "smc_weight",       # weight of the SMC lever (0‑1)
     # add any other levers you expose in config.yaml
 ]
+PARAM_KEYS = [
+    "liq_imbalance_weight",
+    "atr_k_stop",
+    "regime_weight_trend",
+    "regime_weight_range",
+    # existing keys …
+    "risk_fraction_1",
+    "risk_fraction_2",
+    "risk_fraction_3",
+    # …
+]
+
 
 PARAM_BOUNDS = {
     "risk_pct":       (0.003, 0.020),   # 0.3 % – 2 %
