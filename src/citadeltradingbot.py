@@ -1,17 +1,4 @@
 #!/usr/bin/env python3
-"""
-CITADEL QUANTUM TRADER – MISSION CONTROL EDITION
-
-Complete integration with the Mission‑Control Dashboard.
-All features (risk limits, levers, exit‑management, etc.) are
-controllable in real‑time via the dashboard – no code changes
-required after deployment.
-
-Author: Lawful Banker
-Created: 2024‑11‑26
-Version: 2.0 – Production Ready
-"""
-
 # ----------------------------------------------------------------------
 # Standard library
 # ----------------------------------------------------------------------
@@ -21,6 +8,8 @@ import time
 from datetime import datetime, date, time as dt_time, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+import threading, time, os, signal
 
 # ----------------------------------------------------------------------
 # Third‑party
@@ -720,3 +709,50 @@ if __name__ == "__main__":
         logger.info("Shutdown signal received – terminating")
     finally:
         mt5.shutdown()
+
+CONFIG_PATH = "/app/config/config.yaml"
+NEW_CONFIG_PATH = "/app/config/new_config.yaml"
+
+def reload_config():
+    """Called when a new config file appears."""
+    # 1️⃣ Replace the old file atomically
+    if os.path.isfile(NEW_CONFIG_PATH):
+        os.replace(NEW_CONFIG_PATH, CONFIG_PATH)
+        # 2️⃣ Signal the main loop to re‑load (e.g., set a flag)
+        # Assuming you have a global Config singleton:
+        from config_loader import Config
+        Config()._load()   # re‑read the file
+        print("[WATCHER] Config reloaded from new_config.yaml")
+    else:
+        print("[WATCHER] No new config found")
+
+def config_watcher(stop_event: threading.Event):
+    last_mtime = None
+    while not stop_event.is_set():
+        try:
+            mtime = os.path.getmtime(NEW_CONFIG_PATH)
+            if last_mtime is None:
+                last_mtime = mtime
+            elif mtime != last_mtime:
+                reload_config()
+                last_mtime = mtime
+        except FileNotFoundError:
+            # No new config yet – ignore
+            pass
+        time.sleep(5)   # poll every 5 s
+
+# In your main() function:
+stop_evt = threading.Event()
+watcher_thread = threading.Thread(target=config_watcher, args=(stop_evt,), daemon=True)
+watcher_thread.start()
+
+# Ensure graceful shutdown
+def handle_sigterm(signum, frame):
+    stop_evt.set()
+    watcher_thread.join(timeout=5)
+    # … any other cleanup …
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_sigterm)
+signal.signal(signal.SIGINT, handle_sigterm)
+
