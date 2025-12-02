@@ -74,3 +74,8 @@ jobs:
           VERSION=$(date +'%Y.%m.%d')
           git tag -a "prod-${VERSION}" -m "Production release ${VERSION}"
           git push origin "prod-${VERSION}"
+
+          - name: Install system deps for matplotlib
+  run: |
+    apt-get update && apt-get install -y libglib2.0-0 libgomp1 libpng-dev libfreetype6-dev
+
