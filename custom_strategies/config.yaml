@@ -1,0 +1,4 @@
+reserve_pool_pct: 0.20          # 20 % of start equity kept safe
+volatility_risk_factor: 1.0    # multiplier applied to aggressive pool (1 = no change)
+global_risk_budget_warn: 0.90  # if global_risk_percentage > 90 % of the 5 % cap, shrink aggressive pool
+global_risk_shrink_factor: 0.5 # how much to shrink when the warning triggers
