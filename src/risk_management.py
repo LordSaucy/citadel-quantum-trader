@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Tuple, Optional
 from src.metrics import set_bucket_risk   # adjust import path if needed
 from src.bot_control import get_bucket_flag
+from sqlalchemy import create_engine, text
 
 
 from .config import logger, env
@@ -18,8 +19,19 @@ import math
 from config_loader import Config
 from prometheus_client import Gauge
 
+engine = create_engine(cfg["db_uri"])
 
 log = logging.getLogger("citadel_bot")
+
+def get_latest_avg_corr() -> float:
+    """Fetch the most recent average correlation from the DB."""
+    with engine.connect() as conn:
+        res = conn.execute(text("""
+            SELECT avg_corr FROM correlation_snapshots
+            ORDER BY ts DESC LIMIT 1;
+        """)).fetchone()
+        return float(res[0]) if res else 0.0
+        
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 r = redis.from_url(REDIS_URL)
@@ -563,4 +575,29 @@ def compute_stake(bucket_id: int, equity: float) -> float:
 
     return stake
 
+def compute_stake(bucket_id: int, equity: float) -> float:
+    trade_idx = get_trade_counter(bucket_id) + 1   # 1‑based
+
+    # ----- original risk‑fraction from schedule -----
+    if isinstance(RISK_SCHEDULE, dict):
+        f = RISK_SCHEDULE.get(trade_idx, RISK_SCHEDULE.get("default", 0.40))
+    else:
+        f = RISK_SCHEDULE[min(trade_idx - 1, len(RISK_SCHEDULE) - 1)]
+
+    # ----- correlation‑based adjustment -----
+    if cfg.get("correlation", {}).get("enabled", False):
+        avg_corr = get_latest_avg_corr()
+        high_thr = cfg["correlation"]["high_corr_threshold"]
+        adj_fact = cfg["correlation"]["adjustment_factor"]
+        if avg_corr > high_thr:
+            # Reduce risk proportionally
+            f = f * adj_fact
+            # (Optionally log the event for audit)
+            logger.info(f"[Corr] High avg_corr={avg_corr:.3f} → risk_fraction reduced to {f:.4f}")
+
+    # ----- broker‑specific min‑margin / lot‑size check (unchanged) -----
+    # ... (same as before) ...
+
+    stake = equity * f
+    return stake
 
