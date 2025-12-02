@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 import datetime
 from sqlalchemy import select, update, insert, delete
 from src.edge_decay_detector import EdgeDecayDetector  # forward reference (optional)
+from redis import Redis
+
 
 
 
@@ -24,6 +26,18 @@ dynamic_risk_fraction = Gauge(
     "cqt_dynamic_risk_fraction",
     "Current dynamic risk fraction (0‑1)",
 )
+redis_client = Redis(host="redis", port=6379, db=0)
+
+def should_run() -> bool:
+    # 0 = off, 1 = kill‑switch active
+    return not bool(int(redis_client.get("kill_switch_active") or 0))
+
+while True:
+    if not should_run():
+        logger.info("⚠️ Kill‑switch active – pausing trading loop")
+        time.sleep(5)          # back‑off while the flag is set
+        continue
+    # … normal signal generation, risk checks, execution …
 
 # ----------------------------------------------------------------------
 # Configuration (all overridable via environment variables)
