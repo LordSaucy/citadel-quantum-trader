@@ -231,6 +231,15 @@ PARAM_KEYS = [
     "smc_weight",       # weight of the SMC lever (0‑1)
     # add any other levers you expose in config.yaml
 ]
+
+PARAM_BOUNDS = {
+    "risk_pct":       (0.003, 0.020),   # 0.3 % – 2 %
+    "sl_multiplier": (0.5, 3.0),
+    "tp_multiplier": (1.0, 5.0),
+    "smc_weight":    (0.5, 0.9),
+    # extend as needed
+}
+
 PARAM_KEYS = [
     "liq_imbalance_weight",
     "atr_k_stop",
@@ -243,14 +252,18 @@ PARAM_KEYS = [
     # …
 ]
 
-
 PARAM_BOUNDS = {
-    "risk_pct":       (0.003, 0.020),   # 0.3 % – 2 %
-    "sl_multiplier": (0.5, 3.0),
-    "tp_multiplier": (1.0, 5.0),
-    "smc_weight":    (0.5, 0.9),
-    # extend as needed
+    # New knobs -------------------------------------------------
+    "liq_imbalance_weight": (0.0, 0.30),   # 0 %‑30 % of the SMC score
+    "atr_k_stop": (1.0, 4.0),            # 1‑4 × ATR stop‑loss
+    "regime_weight_trend": (0.0, 1.0),    # 0‑100 % emphasis on trend regime
+    "regime_weight_range": (0.0, 1.0),    # 0‑100 % emphasis on range regime
+    # Existing knobs (example) -------------------------------
+    "risk_fraction_1": (0.001, 0.02),
+    "risk_fraction_2": (0.001, 0.02),
+    # …
 }
+
 
 # ---------- 2️⃣ DEAP boilerplate ----------
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
