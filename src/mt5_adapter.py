@@ -82,3 +82,63 @@ async def submit_order_async(self, symbol, volume, side, price=None):
         raise RuntimeError(f"Order failed: {result.comment}")
     # Return the ticket; the caller can poll `mt5.positions_get(ticket=…)`
     return str(result.order)
+
+class MT5Adapter:
+    def __init__(self, paper_mode: bool = False):
+        self.paper_mode = paper_mode
+        # Load credentials from Vault (the same code you already have)
+        self._load_credentials()
+        # If paper_mode, point the MetaTrader5 client at the demo server
+        if self.paper_mode:
+            self.server = self.creds["server"]   # demo server from Vault
+        else:
+            self.server = self.creds["server"]   # production server
+
+    # -----------------------------------------------------------------
+    # Example: send_order – record latency & slippage metrics
+    # -----------------------------------------------------------------
+    def send_order(self, order):
+        start = time.time()
+        # -----------------------------------------------------------------
+        # 1️⃣  Call MT5 (or IBKR) – the library automatically talks to the
+        #     demo server when `self.server` points there.
+        # -----------------------------------------------------------------
+        response = self._mt5_send(order)   # existing low‑level call
+        elapsed = time.time() - start
+
+        # -----------------------------------------------------------------
+        # 2️⃣  Record latency (seconds) – Prometheus gauge
+        # -----------------------------------------------------------------
+        from prometheus_client import Gauge
+        latency_gauge = Gauge('cqt_latency_seconds',
+                             'Round‑trip latency of order submission (seconds)',
+                             ['symbol'])
+        latency_gauge.labels(symbol=order.symbol).set(elapsed)
+
+        # -----------------------------------------------------------------
+        # 3️⃣  Detect rejection
+        # -----------------------------------------------------------------
+        reject_counter = Counter('cqt_reject_total',
+                                 'Total number of order rejections',
+                                 ['symbol'])
+        if not response.success:
+            reject_counter.labels(symbol=order.symbol).inc()
+            log.warning(f"❌ Order rejected [{order.symbol}] – {response.error}")
+
+        # -----------------------------------------------------------------
+        # 4️⃣  Compute slippage (in pips) – compare requested price vs fill price
+        # -----------------------------------------------------------------
+        slippage_gauge = Gauge('cqt_slippage_pips',
+                               'Absolute slippage per filled order (pips)',
+                               ['symbol'])
+        # For a BUY: slippage = fill_price - requested_price
+        # For a SELL: slippage = requested_price - fill_price
+        if order.direction.upper() == "BUY":
+            slip = (response.fill_price - order.price) / self.pip_size(order.symbol)
+        else:
+            slip = (order.price - response.fill_price) / self.pip_size(order.symbol)
+
+        slippage_gauge.labels(symbol=order.symbol).set(abs(slip))
+
+        return response
+
