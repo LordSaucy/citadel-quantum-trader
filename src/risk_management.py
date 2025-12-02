@@ -7,6 +7,11 @@ from prometheus_client import Gauge
 import logging
 from datetime import datetime, timedelta
 
+import datetime
+from sqlalchemy import select, update, insert, delete
+from src.edge_decay_detector import EdgeDecayDetector  # forward reference (optional)
+
+
 
 # ----------------------------------------------------------------------
 # Prometheus gauges (exported automatically by the Flask entrypoint)
@@ -135,6 +140,66 @@ from sqlalchemy import update, select, func
 RESERVE_POOL_PCT = cfg.get("reserve_pool_pct", 0.20)   # 20 % default
 
 class RiskManagementLayer:
+
+     # ... existing code ...
+
+    # -------------------------------------------------
+    # 1️⃣ Apply a temporary multiplier for a bucket
+    # -------------------------------------------------
+    def apply_temporary_modifier(self, bucket_id: int, multiplier: float, trades: int):
+        """Create or update a row in edge_decay_modifiers."""
+        with self.engine.begin() as conn:
+            stmt = select(edge_decay_modifiers.c.bucket_id).where(
+                edge_decay_modifiers.c.bucket_id == bucket_id
+            )
+            exists = conn.execute(stmt).scalar()
+            if exists:
+                upd = (
+                    edge_decay_modifiers.update()
+                    .where(edge_decay_modifiers.c.bucket_id == bucket_id)
+                    .values(multiplier=multiplier, remaining_trades=trades,
+                            created_at=datetime.datetime.utcnow())
+                )
+                conn.execute(upd)
+            else:
+                ins = edge_decay_modifiers.insert().values(
+                    bucket_id=bucket_id,
+                    multiplier=multiplier,
+                    remaining_trades=trades,
+                    created_at=datetime.datetime.utcnow(),
+                )
+                conn.execute(ins)
+
+    # -------------------------------------------------
+    # 2️⃣ Get the *effective* risk fraction for a bucket
+    # -------------------------------------------------
+    def get_effective_risk_fraction(self, bucket_id: int, base_fraction: float) -> float:
+        """Return base_fraction adjusted by any active edge‑decay modifier."""
+        with self.engine.begin() as conn:
+            row = conn.execute(
+                select(edge_decay_modifiers.c.multiplier,
+                       edge_decay_modifiers.c.remaining_trades)
+                .where(edge_decay_modifiers.c.bucket_id == bucket_id)
+            ).first()
+            if row:
+                # Decrement the counter (one trade consumed)
+                new_remaining = max(row.remaining_trades - 1, 0)
+                if new_remaining == 0:
+                    # Modifier expired – delete it
+                    conn.execute(
+                        edge_decay_modifiers.delete().where(
+                            edge_decay_modifiers.c.bucket_id == bucket_id
+                        )
+                    )
+                else:
+                    conn.execute(
+                        edge_decay_modifiers.update()
+                        .where(edge_decay_modifiers.c.bucket_id == bucket_id)
+                        .values(remaining_trades=new_remaining)
+                    )
+                return base_fraction * float(row.multiplier)
+        return base_fraction
+
     # -----------------------------------------------------------------
     # Helper: fetch current pools for a bucket
     # -----------------------------------------------------------------
