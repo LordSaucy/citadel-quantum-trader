@@ -457,5 +457,19 @@ volumes:
     - "8000"                 # health / metrics endpoint (internal only)
   restart: unless-stopped    # <‑‑ THIS IS THE KEY line
 
+Add the new service definition (replace the placeholder you already have, or insert if missing):
+ bot-control:
+    build:
+      context: ./admin_ui/bot_control
+      dockerfile: Dockerfile
+    container_name: citadel-bot-control
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CONTROL_API_KEY=${CONTROL_API_KEY:-CHANGE_ME}
+    depends_on:
+      - redis          # make sure you have a redis container in the stack
+    networks:
+      - backend
+    restart: unless-stopped
 
  
