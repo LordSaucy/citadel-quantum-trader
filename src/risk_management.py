@@ -634,3 +634,33 @@ def current_max_dd_allowed() -> float:
     # If volatility doubles, we cut the allowed DD in half:
     return MAX_DD_BASE / max(vol_factor, 1.0)   # never increase above the static cap
 
+class RiskManager:
+    def __init__(self, db):
+        self.db = db
+        self.symbol_exposure = {}   # {symbol: current_exposure_usd}
+        self.aggressive_pool = cfg["aggressive_pool_fraction"] * self.total_equity()   # e.g., 0.30 of total AUM
+
+    def total_equity(self) -> float:
+        # Pull the sum of equity from the DB (cached per minute)
+        ...
+
+    def update_symbol_exposure(self, symbol: str, delta_usd: float) -> None:
+        self.symbol_exposure[symbol] = self.symbol_exposure.get(symbol, 0.0) + delta_usd
+
+    def allocate_for_trade(self, bucket_id: int, symbol: str, equity: float, risk_frac: float) -> float:
+        """Return the dollar stake for the trade, or raise an exception."""
+        stake = equity * risk_frac
+
+        # ---- Per‑symbol ceiling ----
+        ceiling = 0.12 * self.aggressive_pool   # 12 % of aggressive pool
+        current = self.symbol_exposure.get(symbol, 0.0)
+
+        if current + stake > ceiling:
+            # Reduce stake so we stay under the ceiling
+            stake = max(0.0, ceiling - current)
+            if stake <= 0:
+                raise RuntimeError(f"Symbol {symbol} exposure ceiling reached")
+
+        # Record the provisional exposure (will be finalized after the trade)
+        self.update_symbol_exposure(symbol, stake)
+        return stake
