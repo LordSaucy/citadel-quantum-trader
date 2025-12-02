@@ -888,3 +888,60 @@ promtail:
   restart: unless-stopped
   networks:
     - backend
+
+services:
+  # -------------------------------------------------
+  # Existing services (PostgreSQL, Prometheus, Grafana, Bot, etc.)
+  # -------------------------------------------------
+  citadel-db:
+    image: postgres:15
+    # … (unchanged)
+
+  prometheus:
+    image: prom/prometheus:latest
+    # … (unchanged)
+
+  grafana-private:
+    image: grafana/grafana:latest
+    # … (unchanged)
+
+  grafana-public:
+    image: grafana/grafana:latest
+    # … (unchanged)
+
+  citadel-bot:
+    image: citadel/trader:latest
+    labels:
+      - "citadel=true"          # <-- Promtail filter
+    # … (unchanged)
+
+  bot-control:
+    image: ghcr.io/yourorg/citadel-qt/bot-control:latest
+    # … (unchanged)
+
+  # -------------------------------------------------
+  # 7️⃣ Loki – log storage
+  # -------------------------------------------------
+  loki:
+    image: grafana/loki:2.9.1
+    container_name: citadel-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # -------------------------------------------------
+  # 8️⃣ Promtail – log collector
+  # -------------------------------------------------
+  promtail:
+    image: grafana/promtail:2.9.1
+    container_name: citadel-promtail
+    command: -config.file=/etc/promtail/promtail.yaml
+    volumes:
+      - /var/log:/var/log:ro
+      - ./promtail/prom
