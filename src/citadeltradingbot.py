@@ -8,8 +8,12 @@ import time
 from datetime import datetime, date, time as dt_time, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
 import threading, time, os, signal
+from config_loader import Config
+
+CONFIG_PATH = "/app/config/config.yaml"
+NEW_CONFIG_PATH = "/app/config/new_config.yaml"
+
 
 # ----------------------------------------------------------------------
 # Third‑party
@@ -50,6 +54,89 @@ class CitadelQuantumTraderV4:
     controllable via the dashboard in real‑time.
     """
 
+
+CONFIG_PATH = "/app/config/config.yaml"
+NEW_CONFIG_PATH = "/app/config/new_config.yaml"
+
+def reload_config():
+    """Called when a new config file appears."""
+    # 1️⃣ Replace the old file atomically
+    if os.path.isfile(NEW_CONFIG_PATH):
+        os.replace(NEW_CONFIG_PATH, CONFIG_PATH)
+        # 2️⃣ Signal the main loop to re‑load (e.g., set a flag)
+        # Assuming you have a global Config singleton:
+        from config_loader import Config
+        Config()._load()   # re‑read the file
+        print("[WATCHER] Config reloaded from new_config.yaml")
+    else:
+        print("[WATCHER] No new config found")
+
+def config_watcher(stop_event: threading.Event):
+    last_mtime = None
+    while not stop_event.is_set():
+        try:
+            mtime = os.path.getmtime(NEW_CONFIG_PATH)
+            if last_mtime is None:
+                last_mtime = mtime
+            elif mtime != last_mtime:
+                reload_config()
+                last_mtime = mtime
+        except FileNotFoundError:
+            # No new config yet – ignore
+            pass
+        time.sleep(5)   # poll every 5 s
+
+# In your main() function:
+stop_evt = threading.Event()
+watcher_thread = threading.Thread(target=config_watcher, args=(stop_evt,), daemon=True)
+watcher_thread.start()
+
+# Ensure graceful shutdown
+def handle_sigterm(signum, frame):
+    stop_evt.set()
+    watcher_thread.join(timeout=5)
+    # … any other cleanup …
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_sigterm)
+signal.signal(signal.SIGINT, handle_sigterm)
+def _reload_config():
+    """Atomically replace the active config and force a reload."""
+    if os.path.isfile(NEW_CONFIG_PATH):
+        os.replace(NEW_CONFIG_PATH, CONFIG_PATH)   # atomic swap
+        Config()._load()                           # re‑read singleton
+        print("[WATCHER] Config reloaded from new_config.yaml")
+
+def _watcher(stop_evt: threading.Event):
+    last_mtime = None
+    while not stop_evt.is_set():
+        try:
+            mtime = os.path.getmtime(NEW_CONFIG_PATH)
+            if last_mtime is None:
+                last_mtime = mtime
+            elif mtime != last_mtime:
+                _reload_config()
+                last_mtime = mtime
+        except FileNotFoundError:
+            pass
+        time.sleep(5)   # poll interval
+    print("[WATCHER] Stopped")
+
+# In the main entry point:
+stop_event = threading.Event()
+watch_thread = threading.Thread(target=_watcher, args=(stop_event,), daemon=True)
+watch_thread.start()
+
+# Graceful shutdown (SIGTERM / SIGINT)
+import signal, sys
+def _handle_term(sig, frame):
+    stop_event.set()
+    watch_thread.join(timeout=5)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _handle_term)
+signal.signal(signal.SIGINT,  _handle_term)
+ 
     # ------------------------------------------------------------------
     # Construction
     # ------------------------------------------------------------------
@@ -710,49 +797,6 @@ if __name__ == "__main__":
     finally:
         mt5.shutdown()
 
-CONFIG_PATH = "/app/config/config.yaml"
-NEW_CONFIG_PATH = "/app/config/new_config.yaml"
 
-def reload_config():
-    """Called when a new config file appears."""
-    # 1️⃣ Replace the old file atomically
-    if os.path.isfile(NEW_CONFIG_PATH):
-        os.replace(NEW_CONFIG_PATH, CONFIG_PATH)
-        # 2️⃣ Signal the main loop to re‑load (e.g., set a flag)
-        # Assuming you have a global Config singleton:
-        from config_loader import Config
-        Config()._load()   # re‑read the file
-        print("[WATCHER] Config reloaded from new_config.yaml")
-    else:
-        print("[WATCHER] No new config found")
 
-def config_watcher(stop_event: threading.Event):
-    last_mtime = None
-    while not stop_event.is_set():
-        try:
-            mtime = os.path.getmtime(NEW_CONFIG_PATH)
-            if last_mtime is None:
-                last_mtime = mtime
-            elif mtime != last_mtime:
-                reload_config()
-                last_mtime = mtime
-        except FileNotFoundError:
-            # No new config yet – ignore
-            pass
-        time.sleep(5)   # poll every 5 s
-
-# In your main() function:
-stop_evt = threading.Event()
-watcher_thread = threading.Thread(target=config_watcher, args=(stop_evt,), daemon=True)
-watcher_thread.start()
-
-# Ensure graceful shutdown
-def handle_sigterm(signum, frame):
-    stop_evt.set()
-    watcher_thread.join(timeout=5)
-    # … any other cleanup …
-    sys.exit(0)
-
-signal.signal(signal.SIGTERM, handle_sigterm)
-signal.signal(signal.SIGINT, handle_sigterm)
 
