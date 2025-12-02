@@ -1,0 +1,63 @@
+name: Build & Push Admin UI
+
+on:
+  push:
+    paths:
+      - 'admin_ui/**'
+  pull_request:
+    paths:
+      - 'admin_ui/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_BACKEND: ${{ github.repository }}/admin-backend
+      IMAGE_FRONTEND: ${{ github.repository }}/admin-frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for multi‑arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ---------- Backend ----------
+      - name: Build & push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./admin_ui/backend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_BACKEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ---------- Frontend ----------
+      - name: Build & push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./admin_ui/frontend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_FRONTEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+After the workflow runs, the images ghcr.io/<repo>/admin-backend:latest and .../admin-frontend:latest are available.
+Update your production docker‑compose.yml to pull from the registry (instead of building locally) for a true continuous‑delivery pipeline:
+admin-backend:
+  image: ghcr.io/yourorg/citadel-qt/admin-backend:latest
+  ...
+
+admin-frontend:
+  image: ghcr.io/yourorg/citadel-qt/admin-frontend:latest
+  ...
