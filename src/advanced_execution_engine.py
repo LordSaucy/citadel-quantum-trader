@@ -629,3 +629,7 @@ if cfg['risk_controls'].get('use_lir', False):
         logger.info("LIR guard rejected trade")
         return RejectCode.LIQUIDITY_IMBALANCE
 
+if result.retcode == mt5.TRADE_RETCODE_DONE:
+    pnl = (exit_price - entry_price) * volume * RR_target   # calculate profit in USD
+    risk_manager.record_trade_result(bucket_id, pnl)
+
