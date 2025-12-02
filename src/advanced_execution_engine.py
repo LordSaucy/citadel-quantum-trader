@@ -9,6 +9,8 @@ engine = SMCEngine()          # created at start‑up
 from config_loader import Config
 from volatility_breakout import is_expanding
 from data_fetcher import get_recent_history   # existing helper that returns a DataFrame
+from .venue_manager import VenueManager
+
 
 
 # -------------------------------------------------
@@ -51,8 +53,19 @@ order_price_slippage = Counter(
     ["symbol", "side"],
 )
 
+
 cfg = Config().settings
 RR_TARGET = cfg.get("RR_target", 5.0)   # default 5 if missing
+
+  # -----------------------------------------------------------------
+    # Helper: compute lot size from stake and contract_notional
+    # -----------------------------------------------------------------
+    def _lot_from_stake(self, stake: float) -> float:
+        contract_notional = self.cfg.get("contract_notional", 100_000)  # $ per lot
+        return stake / contract_notional
+
+
+
 
 def build_order(entry_price: float, risk_amount: float):
     # risk_amount = 1 R (the amount you are willing to lose)
@@ -75,6 +88,7 @@ def _watch_config(self):
         self.risk = RiskManagementLayer(cfg)
         self.control = BotControl()               # expose pause/resume/kill
         self.market = MarketDataManager(cfg)
+     self.venue_mgr = VenueManager()   
 
         # ---- instantiate each guard -----------------
         self.sentiment_guard = SentimentGuard(cfg, redis_client)
@@ -192,6 +206,7 @@ class AdvancedExecutionEngine:
     def __init__(self, risk: RiskManagementLayer, confluence) -> None:
         self.risk = risk
         self.confluence = confluence
+        self.venue_mgr = VenueManager()   
 
         # Load broker credentials from env (via src.config.env helper)
         from .config import env
@@ -328,4 +343,48 @@ def on_order_filled(self, order_id, fill_price, fill_timestamp):
     self.logger.info(
         f"Order {order_id} filled – latency={latency:.3f}s, slippage={slippage:.1f} pips"
     )
+   # -----------------------------------------------------------------
+    # Core order submission – now with multi‑venue depth guard
+    # -----------------------------------------------------------------
+    def send_order(self, signal):
+        """
+        signal contains: symbol, side ('buy'/'sell'), price, etc.
+        """
+        # 1️⃣ Compute the stake & lot size
+        equity = self.risk.get_current_equity(signal.bucket_id)
+        stake = equity * self.risk.compute_stake(signal.bucket_id, equity)  # $ risk amount
+        lot = self._lot_from_stake(stake)
+
+        # 2️⃣ Query depth from all venues
+        agg = self.venue_mgr.aggregate_depth(signal.symbol, depth=20)
+
+        # 3️⃣ Verify minimum depth
+        depth_ok = self.venue_mgr.meets_minimum(lot, agg)
+
+        # 4️⃣ Log the depth result (will appear in the immutable ledger)
+        self.risk.log_depth_check(
+            bucket_id=signal.bucket_id,
+            symbol=signal.symbol,
+            depth_ok=depth_ok,
+            agg_bid=agg["bid_volume"],
+            agg_ask=agg["ask_volume"],
+        )
+
+        if not depth_ok:
+            # We could either abort completely or shrink the lot.
+            # For safety we abort and let the edge‑decay detector handle it.
+            self.risk.record_skip(signal, reason="insufficient_depth")
+            return {"status": "rejected", "reason": "insufficient_depth"}
+
+        # 5️⃣ Proceed with the normal execution path (now we know depth is ok)
+        order = self.broker.send_order(
+            symbol=signal.symbol,
+            volume=lot,
+            side=signal.side,
+            price=signal.price,
+            sl=signal.sl,
+            tp=signal.tp,
+        )
+        # … rest of the existing logic (record trade, update ledger, etc.) …
+        return order
 
