@@ -208,5 +208,33 @@ def generate_signal(bar, previous_bar):
     # Continue with regime‑forecast, etc.
     ...
 
+def build_broker_adapter():
+    paper_mode = os.getenv("PAPER_MODE", "false").lower() == "true"
+    shadow_mode = os.getenv("SHADOW_MODE", "false").lower() == "true"
 
+    # New env var that tells us which broker to use
+    broker_type = os.getenv("BROKER_TYPE", "mt5").lower()   # defaults to MT5
+
+    if broker_type == "mt5":
+        from .mt5_adapter import MT5Adapter
+        AdapterCls = MT5Adapter
+    elif broker_type == "ibkr":
+        from .ibkr_adapter import IBKRAdapter
+        AdapterCls = IBKRAdapter
+    elif broker_type == "binance_futures":
+        from .binance_futures_adapter import BinanceFuturesAdapter
+        AdapterCls = BinanceFuturesAdapter
+    else:
+        raise ValueError(f"Unsupported BROKER_TYPE={broker_type}")
+
+    # Pass the appropriate mode flag
+    if shadow_mode:
+        log.info("🕶 Starting in SHADOW‑MODE – orders will be logged, not sent")
+        return AdapterCls(paper_mode=False)   # shadow mode = real creds, no send
+    elif paper_mode:
+        log.info("🧪 Starting in PAPER‑TRADING mode – using demo credentials")
+        return AdapterCls(paper_mode=True)
+    else:
+        log.info("🚀 Starting in LIVE‑MODE – real orders will be sent")
+        return AdapterCls(paper_mode=False)
 
