@@ -19,6 +19,10 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
+from .utils.heatmap import plot_depth_heatmap
+from .alerting import send_alert   # you already have a Slack/PagerDuty helper
+# make sure you import the broker (self.broker is already set)
+
 
 # ----------------------------------------------------------------------
 # Third‑party
@@ -813,3 +817,59 @@ class PositionStackingManager:
 # Global singleton – importable from ``src/main.py``
 # ----------------------------------------------------------------------
 stacking_manager = PositionStackingManager()
+
+class PositionStackingManager:
+    ...
+
+    def _check_liquidity(self, symbol: str, required_volume: float, side: str) -> bool:
+        """
+        Returns True if there is enough depth on the requested side.
+        If not, generates a heat‑map PNG and fires an alert.
+        `side` must be either "buy" or "sell".
+        """
+        depth = self.broker.get_market_depth(symbol, depth=30)
+
+        # Aggregate total volume on each side
+        total_bid = sum(item["bid_vol"] for item in depth)
+        total_ask = sum(item["ask_vol"] for item in depth)
+
+        # Simple rule: we want at least 2× the required volume on the side we will hit
+        if side == "buy":
+            available = total_bid
+        elif side == "sell":
+            available = total_ask
+        else:
+            raise ValueError("side must be 'buy' or 'sell'")
+
+        if required_volume * 2 > available:
+            # Not enough liquidity – generate a heat‑map for post‑mortem / alert
+            try:
+                img_path = plot_depth_heatmap(symbol, depth)
+                alert_payload = {
+                    "title": "⚠ Liquidity warning",
+                    "severity": "warning",
+                    "details": {
+                        "symbol": symbol,
+                        "required_volume": required_volume,
+                        "available_volume": available,
+                        "heatmap_path": img_path,
+                    },
+                }
+                send_alert(**alert_payload)
+            except Exception as exc:
+                # If the heat‑map itself fails we still want to abort the trade
+                send_alert(
+                    title="⚠ Liquidity warning (heat‑map failed)",
+                    severity="warning",
+                    details={
+                        "symbol": symbol,
+                        "required_volume": required_volume,
+                        "available_volume": available,
+                        "error": str(exc),
+                    },
+                )
+            return False
+
+        # Sufficient depth – proceed
+        return True
+
