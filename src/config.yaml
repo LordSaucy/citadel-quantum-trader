@@ -63,3 +63,25 @@ venues:
 # -----------------------------------------------------------------
 min_depth_multiplier: 2.0   # required depth = multiplier × lot‑size
 
+# -------------------------------------------------
+# Shock‑Detector & News‑Sentiment overlay
+# -------------------------------------------------
+risk_shocks:
+  # Sentiment score outside this band will block the trade
+  sentiment:
+    low: -0.2   # very bearish → block
+    high:  0.2   # very bullish → block (optional)
+
+  # Macro‑calendar – number of minutes before/after a scheduled event
+  macro_window_minutes: 30
+
+  # Volatility spike – ATR multiplier over its 30‑day EMA
+  atr_spike_multiplier: 2.0   # e.g., ATR > 2× EMA(30d) → block
+
+  # Sudden price jump – % move in the last N minutes
+  price_jump:
+    window_minutes: 5
+    threshold_pct: 1.5   # >1.5 % move in 5 min → block
+
+  # Edge‑decay – win‑rate floor (already exists, but we expose it here)
+  winrate_floor: 0.95
