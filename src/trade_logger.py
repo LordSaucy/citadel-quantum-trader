@@ -259,6 +259,10 @@ class TradeLogger:
             f"({profit_loss_pips:.1f} pips) – {exit_reason}"
         )
 
+          is_win = profit > 0
+    _update_streak(bucket_id=self.bucket_id, is_win=is_win)
+
+
         # Re‑calculate the daily performance aggregates
         self._update_daily_performance()
 
