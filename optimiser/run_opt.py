@@ -396,3 +396,30 @@ if __name__ == "__main__":
     # Expose Prometheus metrics on a side‑port (8001)
     start_http_server(8001)
     main()
+import sqlite3, uuid, json, datetime
+
+def persist_best(run_id, cfg, fitness, metrics, notes=""):
+    conn = sqlite3.connect("optimiser_history.db")
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS history (
+        run_id TEXT PRIMARY KEY,
+        timestamp TEXT,
+        config_json TEXT,
+        fitness REAL,
+        metrics TEXT,
+        notes TEXT
+    )""")
+    cur.execute(
+        "INSERT INTO history (run_id, timestamp, config_json, fitness, metrics, notes) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            run_id,
+            datetime.datetime.utcnow().isoformat(),
+            json.dumps(cfg),
+            fitness,
+            json.dumps(metrics),
+            notes,
+        ),
+    )
+    conn.commit()
+    conn.close()
