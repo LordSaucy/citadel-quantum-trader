@@ -91,3 +91,10 @@ async def sse_logs(container_name: str, user=Depends(get_current_user)):
 
     data = query_drawdown(start, end)
     return {"points": data}
+
+@app.post("/config/reload")
+async def reload_config(user=Depends(get_current_user)):
+    from config_loader import Config
+    Config()._load()
+    return {"msg": "Configuration reloaded from config.yaml"}
+
