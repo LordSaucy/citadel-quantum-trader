@@ -139,4 +139,15 @@ COPY models/lightgbm_model.txt /app/models/lightgbm_model.txt
 # (optional) also copy the JSON weight file for the linear fallback
 COPY config/lever_weights.json /app/config/lever_weights.json
 
+# Existing Dockerfile (citadel/trader)
+FROM python:3.11-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Add guard code
+COPY src/guards/ ./src/guards/
+
+
  
