@@ -74,3 +74,17 @@ receivers:
     telegram_configs:
       - bot_token: '{{ file "/etc/alertmanager/telegram_token" }}'
         ...
+        
+receivers:
+  - name: slack-notifications
+    slack_configs:
+      - api_url: '{{ env "SLACK_WEBHOOK_URL" }}'
+        channel: '#trading-alerts'
+        send_resolved: true
+        title: '[{{ .Status }}] {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Details:* {{ .Annotations.description }}
+          *Value:* {{ .Value }}
+          {{ end }}
