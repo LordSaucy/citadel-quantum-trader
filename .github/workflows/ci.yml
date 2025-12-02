@@ -229,5 +229,72 @@ jobs:
             cd /opt/citadel
             docker compose pull admin-backend admin-frontend
             docker compose up -d
+
+            stages:
+  - lint
+  - test
+  - build
+  - deploy
+
+variables:
+  BACKEND_IMG: $CI_REGISTRY_IMAGE/admin-backend
+  FRONTEND_IMG: $CI_REGISTRY_IMAGE/admin-frontend
+
+lint:
+  stage: lint
+  image: python:3.11-slim
+  script:
+    - pip install -r requirements.txt
+    - ruff check src tests
+    - bandit -r src
+    - safety check -r requirements.txt --full-report
+
+unit_tests:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - pip install -r requirements.txt
+    - pytest -m unit --cov=src --cov-report=xml
+  artifacts:
+    reports:
+      cobertura: coverage.xml
+    expire_in: 1 week
+
+integration_tests:
+  stage: test
+  image: python:3.11-slim
+  services:
+    - name: citadel/mt5-demo:latest
+      alias: mt5
+      command: ["sh", "-c", "while true; do sleep 3600; done"]
+  script:
+    - pip install -r requirements.txt
+    - export MT5_SANDBOX_IMAGE=citadel/mt5-demo:latest
+    - pytest -m integration
+
+build_images:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - docker build -t $BACKEND_IMG ./admin_ui/backend
+    - docker build -t $FRONTEND_IMG ./admin_ui/frontend
+    - docker push $BACKEND_IMG
+    - docker push $FRONTEND_IMG
+
+deploy:
+  stage: deploy
+  only:
+    - main
+  script:
+    - apk add --no-cache openssh
+    - chmod 600 $SSH_PRIVATE_KEY
+    - ssh -o StrictHostKeyChecking=no -i $SSH_PRIVATE_KEY $DEPLOY_USER@$DEPLOY_HOST '
+        cd /opt/citadel &&
+        docker compose pull admin-backend admin-frontend &&
+        docker compose up -d --no-deps --build admin-backend admin-frontend'
+
  
 
