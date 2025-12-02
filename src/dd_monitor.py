@@ -640,3 +640,7 @@ class EnhancedDrawdownTracker:
         logger.info("\n✅ Demo complete – inspect 'demo_drawdown_report.json'")
         logger.info("=" * 80)
 
+if kill_switch.update_drawdown(current_drawdown):
+    # Call the API that pauses all buckets
+    requests.post("http://localhost:8000/api/v1/kill_switch")
+    logger.warning("Kill‑switch engaged – draw‑down sustained above %.0f%%", DD_THRESHOLD*100)
