@@ -988,3 +988,18 @@ otel-collector:
   networks:
     - backend
   restart: unless-stopped
+
+  # -------------------------------------------------
+# 10️⃣ Jaeger – all‑in‑one (UI + collector)
+# -------------------------------------------------
+jaeger:
+  image: jaegertracing/all-in-one:1.53
+  container_name: citadel-jaeger
+  environment:
+    COLLECTOR_ZIPKIN_HTTP_PORT: 9411   # optional Zipkin compatibility
+  ports:
+    - "6831:6831/udp"   # UDP collector (used by JaegerExporter)
+    - "16686:16686"     # Jaeger UI
+  networks:
+    - backend
+  restart: unless-stopped
