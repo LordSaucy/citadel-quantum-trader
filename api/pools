@@ -1,0 +1,4 @@
+@app.get("/api/pools/{bucket_id}")
+async def get_pools(bucket_id: int, user=Depends(get_current_user)):
+    aggressive, reserve = RiskManagementLayer()._load_pools(bucket_id)
+    return {"aggressive_pool": aggressive, "reserve_pool": reserve}
