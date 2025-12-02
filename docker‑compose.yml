@@ -708,3 +708,23 @@ volumes:
   pgdata:
   pipe:
 
+# -------------------------------------------------
+#  nginx‑proxy – TLS termination for public Grafana &
+#  Prometheus endpoints (exposed on port 443)
+# -------------------------------------------------
+nginx-proxy:
+  image: nginx:alpine
+  container_name: citadel-nginx-proxy
+  restart: unless-stopped
+  ports:
+    - "443:443"                 # public HTTPS
+  depends_on:
+    - grafana-public            # the anonymous Grafana instance
+    - prometheus
+  volumes:
+    - ./nginx/conf.d:/etc/nginx/conf.d:ro   # our config files
+    - ./certs:/etc/nginx/certs:ro           # TLS certs (fullchain.pem + privkey.pem)
+  networks:
+    - backend
+
+
