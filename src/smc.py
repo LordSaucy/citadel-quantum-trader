@@ -123,11 +123,9 @@ class SMCController:
     CONFIG_PATH = Path("/app/config/smc_config.json")   # mount this dir in Docker
 
     # ------------------------------------------------------------------
-    def __init__(self) -> None:
-        self._stop = Event()
-        self._load_or_create()
-        self._register_gauges()
-        self._start_watcher()
+     def __init__(self):
+        # Load once
+        self.refresh_params()
 
     # ------------------------------------------------------------------
     def _load_or_create(self) -> None:
