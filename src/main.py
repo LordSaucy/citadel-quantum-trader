@@ -238,3 +238,64 @@ def build_broker_adapter():
         log.info("🚀 Starting in LIVE‑MODE – real orders will be sent")
         return AdapterCls(paper_mode=False)
 
+
+import asyncio
+from tracing import tracer
+from prometheus_client import Counter, Histogram
+
+order_success = Counter("order_success_total", "Successful orders")
+order_failure = Counter("order_failure_total", "Failed orders")
+order_latency = Histogram(
+    "order_latency_seconds",
+    "Latency from signal to broker ACK",
+    buckets=[0.01, 0.05, 0.1, 0.15, 0.2, 0.5, 1.0],
+)
+
+async def process_one_signal(signal):
+    # Whole processing of a single signal is a trace span
+    with tracer.start_as_current_span("process_signal") as span:
+        span.set_attribute("symbol", signal.symbol)
+        span.set_attribute("direction", signal.direction)
+
+        # 1️⃣ Depth / LIR guard (another nested span)
+        with tracer.start_as_current_span("depth_guard"):
+            if not depth_guard_ok(signal):
+                order_failure.inc()
+                span.set_attribute("guard", "depth_failed")
+                return
+
+        # 2️⃣ Risk calculation
+        with tracer.start_as_current_span("risk_calc") as risk_span:
+            stake = risk_manager.compute_stake(signal.bucket_id, signal.equity)
+            risk_span.set_attribute("risk_fraction", stake / signal.equity)
+
+        # 3️⃣ Send order (measure latency)
+        start = asyncio.get_event_loop().time()
+        with tracer.start_as_current_span("send_order") as exec_span:
+            result = await execution_engine.send_order(
+                symbol=signal.symbol,
+                volume=stake,
+                direction=signal.direction,
+                sl=signal.stop_loss,
+                tp=signal.take_profit,
+            )
+        elapsed = asyncio.get_event_loop().time() - start
+        order_latency.observe(elapsed)
+
+        if result["retcode"] == 0:
+            order_success.inc()
+            span.set_attribute("order_status", "filled")
+        else:
+            order_failure.inc()
+            span.set_attribute("order_status", "rejected")
+            span.set_attribute("reject_code", result["retcode"])
+
+        # 4️⃣ Record to ledger (final nested span)
+        with tracer.start_as_current_span("ledger_write"):
+            ledger.record_trade(...)
+
+async def main_loop():
+    while True:
+        signal = await market_feed.wait_for_signal()
+        asyncio.create_task(process_one_signal(signal))
+        await asyncio.sleep(0)   # let the event loop schedule other tasks
