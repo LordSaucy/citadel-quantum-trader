@@ -177,3 +177,50 @@ def main() -> int:
     print(f"Overall reject rate     : {reject_rate*100:.2f}%")
     print(f"Average slippage        : {avg_slippage:.3f} pips")
     print("\n--- PASS / FAIL criteria
+
+      # -----------------------------------------------------------------
+    # 9️⃣  Apply the production tolerances
+    # -----------------------------------------------------------------
+    # These numbers are the same limits you enforce in live trading.
+    # Adjust them here if your risk team changes the policy.
+    LATENCY_TOLERANCE_SEC   = 0.5      # ≤ 0.5 seconds per order
+    REJECT_RATE_TOLERANCE   = 0.01     # ≤ 1 % of all orders rejected
+    SLIPPAGE_TOLERANCE_PIPS = 0.5      # ≤ 0.5 pips average slippage
+
+    failures = []
+
+    if max_latency > LATENCY_TOLERANCE_SEC:
+        failures.append(
+            f"❌ LATENCY EXCEEDED – max {max_latency:.3f}s > {LATENCY_TOLERANCE_SEC}s"
+        )
+    else:
+        print(f"✅ Latency within tolerance (≤ {LATENCY_TOLERANCE_SEC}s)")
+
+    if reject_rate > REJECT_RATE_TOLERANCE:
+        failures.append(
+            f"❌ REJECTION RATE EXCEEDED – {reject_rate*100:.2f}% > {REJECT_RATE_TOLERANCE*100:.2f}%"
+        )
+    else:
+        print(f"✅ Rejection rate within tolerance (≤ {REJECT_RATE_TOLERANCE*100:.2f}%)")
+
+    if avg_slippage > SLIPPAGE_TOLERANCE_PIPS:
+        failures.append(
+            f"❌ SLIPPAGE EXCEEDED – avg {avg_slippage:.3f} pips > {SLIPPAGE_TOLERANCE_PIPS} pips"
+        )
+    else:
+        print(f"✅ Slippage within tolerance (≤ {SLIPPAGE_TOLERANCE_PIPS} pips)")
+
+    # -----------------------------------------------------------------
+    # 10️⃣  Emit a concise result for CI / human consumption
+    # -----------------------------------------------------------------
+    if failures:
+        print("\n=== PAPER‑TRADING RESULT: **FAIL** ===")
+        for f in failures:
+            print(f)
+        # Return a non‑zero exit code so CI marks the job as failed
+        return 1
+    else:
+        print("\n=== PAPER‑TRADING RESULT: **PASS** ===")
+        print("All metrics satisfied the production tolerances.")
+        return 0
+
