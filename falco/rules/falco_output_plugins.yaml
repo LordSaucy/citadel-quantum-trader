@@ -1,0 +1,9 @@
+# falco/rules/falco_output_plugins.yaml
+output:
+  - name: slack
+    type: slack
+    config:
+      webhook_url: "${SLACK_WEBHOOK_URL}"
+      channel: "#alerts"
+      username: "falco"
+      icon_emoji: ":rotating_light:"
