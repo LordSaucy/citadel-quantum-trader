@@ -124,3 +124,7 @@ RUN pip install matplotlib seaborn
 
 # Rest of the Dockerfile stays the same
 
+docker compose build citadel-bot
+docker compose up -d citadel-bot
+
+
