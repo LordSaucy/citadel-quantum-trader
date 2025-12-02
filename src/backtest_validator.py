@@ -593,3 +593,41 @@ class BacktestValidator:
 # Global singleton – import this from ``src/main.py`` and use it directly
 # ----------------------------------------------------------------------
 backtester = BacktestValidator()
+
+def export_trades_to_csv(self, filepath: Union[str, pathlib.Path]) -> None:
+    """
+    Write the list of closed trades to a CSV that Monte‑Carlo can consume.
+    The CSV will contain at least:
+        - entry_time
+        - exit_time
+        - symbol
+        - direction
+        - entry_price
+        - exit_price
+        - net_profit   (profit after costs – already stored in the dict)
+        - win          (bool)
+    """
+    import csv
+    path = pathlib.Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    fieldnames = [
+        "entry_time", "exit_time", "symbol", "direction",
+        "entry_price", "exit_price", "net_profit", "win"
+    ]
+
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for trade in self.trades:          # self.trades is the list of dicts
+            writer.writerow({
+                "entry_time": trade["entry_time"],
+                "exit_time":  trade["exit_time"],
+                "symbol":     trade["symbol"],
+                "direction":  trade["direction"],
+                "entry_price": trade["entry_price"],
+                "exit_price":  trade["exit_price"],
+                "net_profit":  trade["net_profit"],   # <-- net after costs
+                "win":         trade["win"]
+            })
+
