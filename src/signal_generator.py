@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from features import FEATURES, load_regime_weights
 from config_loader import Config   # a tiny wrapper that loads config.yaml
-from utils import standardize      # optional z‑score normalizer
+from utils import standardize      # optional z‑score normalizerfrom .scorer import build_scorer
 
 cfg = Config().settings
 
@@ -17,6 +17,8 @@ class SignalEngine:
             "range": load_regime_weights(cfg, "range"),
             "high_vol": load_regime_weights(cfg, "high_vol")
         }
+
+    self.scorer = build_scorer(self.cfg)   # cfg is the parsed config.yaml
 
     def _select_weights(self, regime_label: str) -> pd.Series:
         """Return the weight vector that matches the current regime."""
@@ -78,3 +80,5 @@ class SignalEngine:
         score_series = (feats * w).sum(axis=1)
 
         return score_series
+
+
