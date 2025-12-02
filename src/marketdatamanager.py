@@ -532,4 +532,18 @@ def fetch_multi_tf(symbol: str, lookback: int = 500) -> dict[str, pd.DataFrame]:
         result[tf_name] = df
     return result
 
+def get_candles(symbol, timeframe_minutes, limit):
+    
+    utc_from = datetime.utcnow() - timedelta(minutes=timeframe_minutes * limit)
+    rates = mt5.copy_rates_range(
+        symbol,
+        timeframe=mt5.TIMEFRAME_M1 * timeframe_minutes,   # MT5 defines multiples of M1
+        from_date=utc_from,
+        to_date=datetime.utcnow()
+    )
+    df = pd.DataFrame(rates)
+    df['timestamp'] = pd.to_datetime(df['time'], unit='s')
+    return df[['timestamp','open','high','low','close','volume']]
+
+
 
