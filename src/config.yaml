@@ -1,0 +1,13 @@
+# In config_watcher()
+def reload_config():
+    # 1️⃣ Pause new signal processing
+    from src.trading_engine import signal_queue
+    signal_queue.pause()          # implementation depends on your engine
+    # 2️⃣ Swap files & reload
+    if os.path.isfile(NEW_CONFIG_PATH):
+        os.replace(NEW_CONFIG_PATH, CONFIG_PATH)
+        from config_loader import Config
+        Config()._load()
+    # 3️⃣ Un‑pause after a short debounce
+    time.sleep(0.5)               # give the engine a moment to settle
+    signal_queue.resume()
