@@ -1,0 +1,8 @@
+
+scrape_configs:
+  # existing jobs …
+  - job_name: "global_risk_controller"
+    static_configs:
+      - targets: ["global-risk-controller:9100"]
+    metrics_path: /metrics
+    scheme: http
