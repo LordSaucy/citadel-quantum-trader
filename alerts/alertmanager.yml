@@ -212,4 +212,63 @@ receivers:
       - url: http://admin-backend:8000/api/v1/kill-switch   # endpoint that sets gauge to 1
         send_resolved: true
 
+# monitoring/alertmanager.yml
+global:
+  resolve_timeout: 5m
+
+# -----------------------------------------------------------------
+# 1️⃣ Define the *calendar* of market holidays (UTC)
+# -----------------------------------------------------------------
+time_intervals:
+  # Example: US NYSE holidays for 2025 (add as many as you need)
+  - name: "nyse_holiday_2025_01_01"
+    time_intervals:
+      - start_time: "2025-01-01T00:00:00Z"
+        end_time:   "2025-01-01T23:59:59Z"
+  - name: "nyse_holiday_2025_07_04"
+    time_intervals:
+      - start_time: "2025-07-04T00:00:00Z"
+        end_time:   "2025-07-04T23:59:59Z"
+  # … add the rest of your holiday list …
+
+# -----------------------------------------------------------------
+# 2️⃣ Define a *mute* interval that starts at the beginning of a holiday
+#    and lasts 5 minutes (the “grace period” you asked for)
+# -----------------------------------------------------------------
+mute_time_intervals:
+  - name: "holiday_grace_5m"
+    time_intervals:
+      - start_time: "00:00:00"
+        end_time:   "00:05:00"
+    # The above times are *relative* to the parent time_interval.
+    # They will be applied for each holiday defined above.
+
+# -----------------------------------------------------------------
+# 3️⃣ Routing – attach the mute interval to the alerts you care about
+# -----------------------------------------------------------------
+route:
+  receiver: "slack-notifications"
+  # Apply the mute interval to *all* alerts that match the names below.
+  # You can add more matchers (e.g., severity) if you wish.
+  routes:
+    - receiver: "slack-notifications"
+      match:
+        alertname: "drawdown"
+      mute_time_intervals: ["holiday_grace_5m"]
+    - receiver: "slack-notifications"
+      match:
+        alertname: "order_success_degradation"
+      mute_time_intervals: ["holiday_grace_5m"]
+    - receiver: "slack-notifications"
+      match:
+        alertname: "latency_high"
+      mute_time_intervals: ["holiday_grace_5m"]
+    # … add any other noisy alerts you want to silence during holidays …
+
+receivers:
+  - name: "slack-notifications"
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK}"
+        channel: "#trading-alerts"
+        send_resolved: true
 
