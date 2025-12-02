@@ -1019,3 +1019,48 @@ services:
       restart_policy:
         condition: none
 
+services:
+  # -----------------------------------------------------------------
+  # 1️⃣  Bot container – use the same image, just point it at the demo secret
+  # -----------------------------------------------------------------
+  citadel-bot:
+    image: citadel/trader:latest                # built from your Dockerfile
+    environment:
+      # Tell the bot to read the demo secret instead of the prod one
+      VAULT_SECRET_PATH: "secret/data/citadel/demo_mt5"
+      # Enable the flag that disables any real‑money side‑effects
+      PAPER_MODE: "true"
+    volumes:
+      - ./vault/agent.hcl:/etc/vault/agent.hcl:ro
+      - vault-secrets:/run/secrets
+    # Keep the same entrypoint that starts the Vault side‑car and the bot
+    entrypoint: ["/bin/sh","-c","\
+      vault agent -config=/etc/vault/agent.hcl -exit-after-auth \
+      && python src/main.py"]
+    networks:
+      - internal
+
+  # -----------------------------------------------------------------
+  # 2️⃣  (Optional) Separate PostgreSQL schema for paper‑trading
+  # -----------------------------------------------------------------
+  # If you want to keep paper trades completely isolated, uncomment
+  # the block below and adjust the DB URL in your bot config.
+  #
+  # citadel-db-paper:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_USER: citadel
+  #     POSTGRES_PASSWORD: paper_secret
+  #     POSTGRES_DB: citadel_paper
+  #   volumes:
+  #     - pgdata-paper:/var/lib/postgresql/data
+  #   networks:
+  #     - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  vault-secrets:
+  # pgdata-paper:   # uncomment if you enable the paper DB
