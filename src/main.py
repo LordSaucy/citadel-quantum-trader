@@ -3,6 +3,7 @@ from flask import Flask, jsonify
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from news_overlay import is_recent_high_impact
+from prometheus_client import Gauge
 
 from .config import logger, env
 from .risk_management import RiskManagementLayer
@@ -428,5 +429,12 @@ while True:
     # j) Sleep until the next bar arrives (or use an async scheduler)
     # -----------------------------------------------------------------
     time.sleep(feed.bar_interval_seconds)
+    
+vwap_gauge = Gauge('cqt_vwap_bias', 'Binary flag – 1 if price > VWAP')
+atr_stop_gauge = Gauge('cqt_atr_stop', 'ATR‑scaled stop price (USD)')
 
+# Inside the loop, after computing features:
+feat_df = signal_engine.compute_features(df)
+vwap_gauge.set(feat_df['vwap_bias'].iloc[-1])
+atr_stop_gauge.set(feat_df['atr_stop'].iloc[-1])
 
