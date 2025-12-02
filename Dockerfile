@@ -111,3 +111,16 @@ fi
 # Finally exec the command passed via CMD.
 # ------------------------------------------------------------
 exec "$@" 
+
+# Dockerfile (existing)
+FROM python:3.11-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Add the new libs
+RUN pip install matplotlib seaborn
+
+# Rest of the Dockerfile stays the same
+
