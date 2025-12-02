@@ -10,6 +10,7 @@ from config_loader import Config
 from volatility_breakout import is_expanding
 from data_fetcher import get_recent_history   # existing helper that returns a DataFrame
 from .venue_manager import VenueManager
+from trade_logger import TradeLogger   # import the logger singleton or instantiate it
 
 
 
@@ -52,6 +53,40 @@ order_price_slippage = Counter(
     "Absolute price difference between submitted price and fill price (pips)",
     ["symbol", "side"],
 )
+
+# Assuming you have a global logger instance:
+LOGGER = TradeLogger()   # or however you obtain it in your code base
+
+def _check_liquidity(self, symbol, required_volume, side):
+    depth = self.broker.get_market_depth(symbol, depth=30)
+    total_bid = sum(d['bid_vol'] for d in depth)
+    total_ask = sum(d['ask_vol'] for d in depth)
+
+    # Need at least 2× required volume on the side we intend to trade
+    available = total_bid if side == "buy" else total_ask
+    if required_volume * 2 > available:
+        # ---- 1️⃣ Alert the operator (already present) ----
+        img_path = plot_depth_heatmap(symbol, depth)
+        send_alert(
+            title="⚠ Liquidity warning",
+            severity="warning",
+            details={"symbol": symbol,
+                     "required_vol": required_volume,
+                     "heatmap": img_path},
+        )
+
+        # ---- 2️⃣ Record a synthetic loss (new) ----
+        # bucket_id is available on the engine (self.bucket_id)
+        LOGGER.log_synthetic_loss(
+            bucket_id=self.bucket_id,
+            symbol=symbol,
+            volume=required_volume,
+            reason="Depth < 2× required volume"
+        )
+
+        # Abort the trade
+        return False
+    return True
 
 
 cfg = Config().settings
