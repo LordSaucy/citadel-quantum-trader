@@ -51,3 +51,21 @@ bucket_current_risk_fraction = Gauge(
 def set_bucket_risk(bucket_id: int, fraction: float):
     """Call this after compute_stake() decides the fraction."""
     bucket_current_risk_fraction.labels(bucket_id=str(bucket_id)).set(fraction)
+
+# Count how many trades were prevented and why
+trade_skipped_total = Counter(
+    "trade_skipped_total",
+    "Number of trades skipped by pre‑trade guard",
+    ["reason"]  # possible values: depth, latency, spread, volatility
+)
+
+# Optional: expose the latest guard‑check values for debugging
+guard_latency_seconds = Gauge("guard_latency_seconds",
+                             "Measured round‑trip latency to broker (seconds)")
+guard_spread_pips = Gauge("guard_spread_pips",
+                         "Current mid‑price spread in pips")
+guard_atr = Gauge("guard_atr",
+                  "Current ATR (absolute) used for volatility‑spike guard")
+guard_lir = Gauge("guard_liquidity_imbalance_ratio",
+                  "Liquidity‑Imbalance Ratio (LIR) for the current signal")
+
