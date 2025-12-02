@@ -149,3 +149,29 @@ class AdvancedExecutionEngine:
 new_equity = self.account.get_equity()   # whatever method you have
 self.risk_manager.calculate_usable_capital(bucket_id=self.bucket_id,
                                             equity=new_equity)
+
+def on_order_filled(self, order_id, fill_price, fill_timestamp):
+    # Retrieve the stored submission info (you can keep a dict keyed by order_id)
+    sub = self.submissions.pop(order_id, None)
+    if not sub:
+        # No submission record – maybe a manual order; just log and return
+        self.logger.warning(f"Fill received for unknown order {order_id}")
+        return
+
+    # ① Compute latency
+    latency = fill_timestamp - sub["submit_ts"]
+    order_latency_seconds.observe(latency)
+
+    # ② Compute price slippage (absolute difference, expressed in pips)
+    #     For FX, 1 pip = 0.0001 (or 0.01 for JPY pairs). Adjust as needed.
+    pip_factor = 0.0001
+    if sub["symbol"].endswith("JPY"):
+        pip_factor = 0.01
+    slippage = abs(fill_price - sub["submit_price"]) / pip_factor
+    order_price_slippage.labels(symbol=sub["symbol"], side=sub["side"]).inc(slippage)
+
+    # ③ Log for audit
+    self.logger.info(
+        f"Order {order_id} filled – latency={latency:.3f}s, slippage={slippage:.1f} pips"
+    )
+
