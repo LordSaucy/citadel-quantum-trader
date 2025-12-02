@@ -601,3 +601,8 @@ def compute_stake(bucket_id: int, equity: float) -> float:
     stake = equity * f
     return stake
 
+if avg_corr > high_thr:
+    schedule = cfg["risk_schedule_defensive"]
+else:
+    schedule = cfg["risk_schedule_normal"]
+f = schedule.get(trade_idx, schedule.get("default", 0.40))
