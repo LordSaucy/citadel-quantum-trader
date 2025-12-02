@@ -582,4 +582,44 @@ def on_order_filled(self, order_id, fill_price, fill_timestamp):
         # … rest of the existing logic (record trade, update ledger, etc.) …
         return order
         
+def generate_signal(bar):
+    # 1️⃣ Existing LSTM/HMM predictions
+    lstm_probs = lstm_model.predict(bar_features)          # shape (3,)
+    hmm_state = hmm_model.predict(bar_features)            # int 0/1/2
 
+    # 2️⃣ GARCH volatility forecast (next minute)
+    recent_returns = compute_returns(bar_history)          # pandas Series
+    garch_res = garch_fit(recent_returns)                 # arch model result
+    vol_forecast = forecast_vol(garch_res, steps=1)[0]     # scalar variance
+
+    # 3️⃣ Build the ensemble vector & match
+    vec = current_regime_vector(lstm_probs, hmm_state, vol_forecast)
+    cluster_id, similarity = match_regime(vec)
+
+    # 4️⃣ Decision: allow trade only if we matched a *good* historical regime
+    if cluster_id is None:
+        logger.info(f"[REGIME] No matching historical regime (sim={similarity:.2f}) – signal suppressed")
+        return None   # abort this candidate
+
+    # Optional: you can also read the stored performance of the matched cluster
+    # and adjust the risk‑fraction dynamically:
+    meta = META[cluster_id]
+    if meta["win_rate"] < 0.92:   # safety net
+        logger.warning(f"[REGIME] Matched cluster {cluster_id} has low win‑rate ({meta['win_rate']:.2%}) – lowering risk")
+        risk_modifier = 0.5   # halve the risk‑fraction for this trade
+    else:
+        risk_modifier = 1.0
+
+    # 5️⃣ Continue with the existing 7‑lever SMC pipeline,
+    # passing `risk_modifier` downstream (e.g., via the RiskManagementLayer)
+    signal = build_signal_from_features(bar, lstm_probs, hmm_state, vol_forecast)
+    signal.risk_modifier = risk_modifier
+    return signal
+
+
+def compute_stake(bucket_id: int, equity: float, risk_modifier: float = 1.0):
+    trade_idx = get_trade_counter(bucket_id) + 1
+    f = RISK_SCHEDULE.get(trade_idx, RISK_SCHEDULE.get("default", 0.40))
+    f *= risk_modifier   # <-- new line
+    stake = equity * f
+    return stake 
