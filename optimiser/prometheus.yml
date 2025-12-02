@@ -1,0 +1,4 @@
+scrape_configs:
+  - job_name: "optimiser"
+    static_configs:
+      - targets: ["optimiser:8001"]
