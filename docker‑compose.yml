@@ -231,4 +231,25 @@ admin-frontend:
   # The outer Nginx (or the WireGuard‑only host) will expose it to the world.
   expose:
     - "80"
+
+    # -------------------------------------------------
+# 8️⃣ Nginx reverse‑proxy (TLS termination)
+# -------------------------------------------------
+nginx-proxy:
+  image: nginx:alpine
+  container_name: citadel-nginx
+  ports:
+    # Public HTTPS port – only this port is reachable from the Internet
+    - "443:443"
+  volumes:
+    - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    - ./nginx/certs:/etc/nginx/certs:ro   # place your cert/key files here
+  depends_on:
+    - grafana-private
+    - grafana-public
+    - admin-frontend
+  networks:
+    - backend
+  restart: unless-stopped
+ 
  
