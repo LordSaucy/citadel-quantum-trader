@@ -16,3 +16,22 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
+
+[Unit]
+Description=Citadel Quantum Trader – Watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/citadel/watchdog.sh
+Restart=always
+User=citadel
+Group=citadel
+Environment=WEBHOOK=https://hooks.slack.com/services/XXX/YYY/ZZZ   # Slack alert on failover
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=citadel-watchdog
+
+[Install]
+WantedBy=multi-user.target
