@@ -1,0 +1,10 @@
+symbols:
+  - EURUSD
+  - GBPUSD
+  - USDJPY
+  - AUDUSD
+  - XAUUSD
+# optional: start_date: "2024-01-01"
+# optional: end_date:   "2024-12-31"
+# provider: "mt5"   # or "polygon", "dukascopy"
+# depth_snapshot: true   # whether to also pull market‑depth (order‑book) levels
