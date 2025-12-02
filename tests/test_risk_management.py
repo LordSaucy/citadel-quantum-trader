@@ -5,6 +5,7 @@ from unittest import mock
 import pytest
 
 from risk_management import RiskManagementLayer
+from src.risk_management_layer import compute_stake, get_trade_counter
 
 
 # ----------------------------------------------------------------------
@@ -77,3 +78,18 @@ def test_kill_switch_cooldown(rm_layer):
         rm_layer._maybe_clear_kill_switch()
         assert rm_layer.kill_switch_active is False
         assert rm_layer.kill_switch_reason == ""
+
+def test_compute_stake_basic(monkeypatch):
+    # Mock DB calls – we only need the trade index
+    monkeypatch.setattr("src.risk_management_layer.get_trade_counter", lambda _: 3)
+    # Fake config – risk schedule from config.yaml
+    from config_loader import Config
+    cfg = Config().settings
+    cfg["risk_schedule"] = {1: 1.0, 2: 1.0, 3: 0.6, "default": 0.4}
+    # Patch the global config used inside the module
+    monkeypatch.setitem("src.risk_management_layer.cfg", cfg, raising=False)
+
+    equity = 10_000.0
+    stake = compute_stake(bucket_id=1, equity=equity)
+    # Trade index = 4 (3 previous + 1) → default 0.4
+    assert pytest.approx(stake, rel=1e-3) == equity * 0.4
