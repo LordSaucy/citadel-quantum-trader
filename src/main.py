@@ -11,6 +11,16 @@ from .advanced_execution_engine import AdvancedExecutionEngine
 from config_loader import Config
 import threading, time, os
 
+import logging, os, time
+import pandas as pd
+from market_feed import MarketFeed          # pulls candles, depth, news, etc.
+from broker_interface import MT5Broker
+from ledger import LedgerWriter
+from risk_management_layer import RiskManager
+from signal_generator import SignalEngine
+from prometheus_client import start_http_server, Counter
+
+
 # ----------------------------------------------------------------------
 # Flask app factory
 # ----------------------------------------------------------------------
@@ -307,4 +317,116 @@ while True:
     df = market_feed.get_latest_dataframe()   # 1‑minute candles, depth, volume, etc.
     regime = regime_detector.predict(df)      # returns "trend", "range", or "high_vol"
     confluence = signal_engine.score(df, regime_label=regime)
+
+# -------------------------------------------------
+# 1️⃣  Initialise everything (once at process start)
+# -------------------------------------------------
+logging.basicConfig(level=logging.INFO)
+start_http_server(8000)                     # Prometheus metrics endpoint
+
+feed          = MarketFeed()                # abstracts MT5/WebAPI, returns DataFrames
+broker        = MT5Broker()                  # thin wrapper around MetaTrader5 SDK
+ledger        = LedgerWriter()
+risk_manager  = RiskManager(ledger)
+signal_engine = SignalEngine()               # ← our new feature‑driven engine
+
+# -------------------------------------------------
+# 2️⃣  Main event loop – runs once per new bar (e.g. 1‑min)
+# -------------------------------------------------
+while True:
+    # -----------------------------------------------------------------
+    # a) Get the freshest market snapshot (candles + depth + news)
+    # -----------------------------------------------------------------
+    df = feed.get_latest_dataframe()        # pandas DF indexed by timestamp
+    if df.empty:
+        logging.warning("No market data – sleeping")
+        time.sleep(5)
+        continue
+
+    # -----------------------------------------------------------------
+    # b) Determine the current regime (trend / range / high‑vol)
+    # -----------------------------------------------------------------
+    regime = feed.regime_detector(df)       # returns string: "trend", "range", or "high_vol"
+
+    # -----------------------------------------------------------------
+    # c) Compute the confluence score using **all** engineered features
+    # -----------------------------------------------------------------
+    confluence_score = signal_engine.score(df, regime_label=regime)
+
+    # -----------------------------------------------------------------
+    # d) Decide whether the score is high enough to consider a trade
+    # -----------------------------------------------------------------
+    # The threshold is a hyper‑parameter that lives in config.yaml
+    if confluence_score.iloc[-1] < cfg["signal_threshold"]:
+        logging.info("Score %.3f below threshold – skipping", confluence_score.iloc[-1])
+        # Still record a “no‑trade” entry for audit purposes
+        ledger.record_no_trade(df.index[-1], reason="score_below_threshold")
+        time.sleep(feed.bar_interval_seconds)
+        continue
+
+    # -----------------------------------------------------------------
+    # e) Determine direction (BUY/SELL) – can be a separate feature
+    # -----------------------------------------------------------------
+    direction = "BUY" if df['close'].iloc[-1] > df['open'].iloc[-1] else "SELL"
+
+    # -----------------------------------------------------------------
+    # f) Compute position size using the **risk manager** (per‑trade cap, reserve pool)
+    # -----------------------------------------------------------------
+    equity   = ledger.current_equity(bucket_id=feed.bucket_id)
+    stake_usd = risk_manager.compute_stake(equity)   # respects the 100%→60%→… schedule
+
+    # -----------------------------------------------------------------
+    # g) Derive stop‑loss / take‑profit from the **ATR‑scaled stop** feature
+    # -----------------------------------------------------------------
+    # The ATR‑scaled stop series is already computed inside the feature layer,
+    # so we just grab the latest value.
+    atr_stop_series = signal_engine.compute_features(df)["atr_stop"]
+    sl_price = atr_stop_series.iloc[-1]               # already = entry - k*ATR
+
+    # For a 5:1 RR we set TP = entry + 5 * (entry - SL)
+    entry_price = df['close'].iloc[-1]
+    tp_price    = entry_price + 5 * (entry_price - sl_price)
+
+    # -----------------------------------------------------------------
+    # h) Send the order to the broker
+    # -----------------------------------------------------------------
+    order_result = broker.send_order(
+        symbol=feed.symbol,
+        volume=stake_usd / entry_price,   # convert USD stake → lots (or units)
+        direction=direction,
+        stop_loss=sl_price,
+        take_profit=tp_price,
+    )
+
+    # -----------------------------------------------------------------
+    # i) Record the outcome in the immutable ledger
+    # -----------------------------------------------------------------
+    if order_result.success:
+        ledger.record_trade(
+            timestamp=df.index[-1],
+            symbol=feed.symbol,
+            direction=direction,
+            entry_price=entry_price,
+            stop_price=sl_price,
+            take_price=tp_price,
+            volume=stake_usd,
+            pnl=order_result.pnl,          # broker returns realized P&L (0 for pending)
+            features=signal_engine.compute_features(df).iloc[-1].to_dict(),
+            confluence_score=confluence_score.iloc[-1],
+            regime=regime,
+        )
+        logging.info("Trade executed – %s %s @ %.5f", direction, feed.symbol, entry_price)
+    else:
+        ledger.record_failed_trade(
+            timestamp=df.index[-1],
+            reason=order_result.error_msg,
+            features=signal_engine.compute_features(df).iloc[-1].to_dict(),
+        )
+        logging.warning("Order rejected: %s", order_result.error_msg)
+
+    # -----------------------------------------------------------------
+    # j) Sleep until the next bar arrives (or use an async scheduler)
+    # -----------------------------------------------------------------
+    time.sleep(feed.bar_interval_seconds)
+
 
