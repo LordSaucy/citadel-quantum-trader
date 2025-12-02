@@ -1,0 +1,8 @@
+# falco/rules/falco_rules.local.yaml
+- rule: Unexpected Python Execution
+  desc: Detect any container that attempts to execute the Python interpreter.
+  condition: evt.type = execve and fd.name = /usr/bin/python
+  output: "Suspicious execution of Python detected (container=%container.id pid=%proc.pid cmdline=%proc.cmdline)"
+  priority: WARNING
+  tags: [container, python, security]
+
