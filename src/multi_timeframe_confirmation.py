@@ -615,3 +615,29 @@ class MultiTimeframeConfirmation:
             "alignment_boost",
             {"high_confidence_threshold": 85.0, "medium_confidence_threshold": 75.0},
         )
+
+def confirm_signal_across_tf(symbol: str, signal_ts: pd.Timestamp) -> bool:
+    """
+    Returns True if at least two time‑frames agree on the same regime
+    for the bar that contains `signal_ts`.
+    """
+    tf_data = fetch_multi_tf(symbol)
+
+    regimes = {}
+    for tf_name, df in tf_data.items():
+        # Align the dataframe to the bar that contains signal_ts
+        # (assume df is sorted by timestamp)
+        bar = df[df['timestamp'] <= signal_ts].iloc[-1]   # last bar <= signal_ts
+        # Build a tiny DataFrame with just the recent history needed for the LSTM
+        # (e.g., last 100 rows ending at `bar`)
+        hist = df[df['timestamp'] <= bar['timestamp']].tail(100)
+        regimes[tf_name] = predict_regime(hist)
+
+    # Count occurrences of each regime
+    counts = {}
+    for r in regimes.values():
+        counts[r] = counts.get(r, 0) + 1
+
+    # If any regime appears in >= 2 TFs, accept
+    return any(cnt >= 2 for cnt in counts.values())
+
