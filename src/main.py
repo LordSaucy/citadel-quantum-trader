@@ -6,6 +6,8 @@ from .config import logger, env
 from .risk_management import RiskManagementLayer
 from .ultimate_confluence_system import bp as confluence_bp, DEFAULT_WEIGHTS
 from .advanced_execution_engine import AdvancedExecutionEngine
+from config_loader import Config
+import threading, time, os
 
 # ----------------------------------------------------------------------
 # Flask app factory
@@ -124,3 +126,28 @@ if __name__ == "__main__":
     host = env("HOST", "0.0.0.0")
     logger.info("Starting CQT Flask API on %s:%s", host, port)
     create_app().run(host=host, port=port, debug=False)
+
+
+def start_config_watcher():
+    cfg_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'config.yaml')
+    last_mtime = os.path.getmtime(cfg_path)
+
+    def watcher():
+        nonlocal last_mtime
+        while True:
+            time.sleep(5)
+            try:
+                mtime = os.path.getmtime(cfg_path)
+                if mtime != last_mtime:
+                    Config()._load()
+                    last_mtime = mtime
+                    print("[CONFIG] Reloaded from config.yaml")
+            except Exception as e:
+                print("[CONFIG] Watcher error:", e)
+
+    threading.Thread(target=watcher, daemon=True).start()
+
+if __name__ == "__main__":
+    start_config_watcher()
+    # … start the bot …
+
