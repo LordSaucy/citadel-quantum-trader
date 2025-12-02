@@ -1,0 +1,17 @@
+
+Column
+Type
+Description
+run_ts
+DATETIME
+Timestamp of the optimisation run.
+fitness
+REAL
+Best fitness value achieved.
+config_json
+TEXT
+JSON‑dump of the best parameter set.
+duration_s
+REAL
+How long the run took.
+
