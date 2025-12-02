@@ -1,6 +1,8 @@
 from prometheus_client import Gauge
 from prometheus_client import Counter, Gauge
 from src.edge_decay_detector import edge_decay_events_total, 
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
 
 bucket_winrate = Gauge(
     "bucket_winrate",
@@ -36,3 +38,16 @@ epth_ok_gauge = Gauge(
     ["bucket_id", "symbol"]
 )
 
+
+# -------------------------------------------------
+# New gauge – per‑bucket risk fraction (0‑1)
+# -------------------------------------------------
+bucket_current_risk_fraction = Gauge(
+    "bucket_current_risk_fraction",
+    "Current risk‑fraction (0‑1) used for the next trade",
+    ["bucket_id"]
+)
+
+def set_bucket_risk(bucket_id: int, fraction: float):
+    """Call this after compute_stake() decides the fraction."""
+    bucket_current_risk_fraction.labels(bucket_id=str(bucket_id)).set(fraction)
