@@ -298,9 +298,11 @@ class RiskManagementLayer:
         else:
             risk_frac = RISK_SCHEDULE.get("default", 0.40)
 
+        effective_frac = self.get_effective_risk_fraction(bucket_id, base_frac)
+
         # 2️⃣ Get the *usable* capital (aggressive pool) after the last trade
         usable_capital = self.calculate_usable_capital(bucket_id, equity)
 
         # 3️⃣ Apply the schedule fraction
-        stake = usable_capital * risk_frac
+        stake = equity * effective_frac
         return stake
