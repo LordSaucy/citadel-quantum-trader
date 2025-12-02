@@ -534,3 +534,32 @@ def compute_stake(bucket_id: int, equity: float) -> float:
     # ----- 6️⃣ Return the *dollar* stake (the broker will convert to lot) -----
     return stake
 
+# -------------------------------------------------
+# Inside compute_stake()
+# -------------------------------------------------
+def compute_stake(bucket_id: int, equity: float) -> float:
+    trade_idx = get_trade_counter(bucket_id) + 1   # next trade number (1‑based)
+
+    # ---- pick risk fraction from schedule (already present) ----
+    if isinstance(RISK_SCHEDULE, dict):
+        f = RISK_SCHEDULE.get(trade_idx, RISK_SCHEDULE.get("default", 0.40))
+    else:
+        f = RISK_SCHEDULE[min(trade_idx - 1, len(RISK_SCHEDULE) - 1)]
+
+    # ---- optional per‑bucket flag (see 2.3) ----
+    use_schedule = os.getenv("USE_RISK_SCHEDULE", "true").lower() == "true"
+    if not use_schedule:
+        f = 0.005   # example fallback: 0.5 % constant risk
+
+    # ---- enforce broker limits (unchanged) ----
+    # ... (existing min_margin / max_lot logic) ...
+
+    # ---- final stake ----
+    stake = equity * f
+
+    # ---- push metric for observability ----
+    set_bucket_risk(bucket_id, f)
+
+    return stake
+
+
