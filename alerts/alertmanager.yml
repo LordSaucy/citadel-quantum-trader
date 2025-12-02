@@ -206,3 +206,10 @@ inhibit_rules:
       severity: "warning"
     equal: ["alertname", "instance"]
 
+receivers:
+  - name: kill-switch
+    webhook_configs:
+      - url: http://admin-backend:8000/api/v1/kill-switch   # endpoint that sets gauge to 1
+        send_resolved: true
+
+
