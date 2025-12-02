@@ -90,3 +90,113 @@ class RiskManagementLayer:
     @property
     def kill_reason(self) -> Optional[str]:
         return self._kill_reason
+
+from sqlalchemy import update, select, func
+
+RESERVE_POOL_PCT = cfg.get("reserve_pool_pct", 0.20)   # 20 % default
+
+class RiskManagementLayer:
+    # -----------------------------------------------------------------
+    # Helper: fetch current pools for a bucket
+    # -----------------------------------------------------------------
+    def _load_pools(self, bucket_id: int) -> tuple[float, float]:
+        """Return (aggressive_pool, reserve_pool) for the bucket."""
+        with engine.connect() as conn:
+            stmt = select(
+                bucket_meta.c.aggressive_pool,
+                bucket_meta.c.reserve_pool,
+            ).where(bucket_meta.c.bucket_id == bucket_id)
+            row = conn.execute(stmt).first()
+            if row is None:
+                # First time we see this bucket – initialise
+                start_eq = cfg["bucket_start_equity"]
+                aggressive = (1.0 - RESERVE_POOL_PCT) * start_eq
+                reserve = RESERVE_POOL_PCT * start_eq
+                # Insert a row
+                ins = bucket_meta.insert().values(
+                    bucket_id=bucket_id,
+                    aggressive_pool=aggressive,
+                    reserve_pool=reserve,
+                )
+                conn.execute(ins)
+                conn.commit()
+                return aggressive, reserve
+            return float(row.aggressive_pool), float(row.reserve_pool)
+
+    # -----------------------------------------------------------------
+    # NEW: calculate usable capital after a trade closes
+    # -----------------------------------------------------------------
+    def calculate_usable_capital(self, bucket_id: int, equity: float) -> float:
+        """
+        Returns the amount of capital that can be risked on the NEXT trade.
+        Logic:
+          1️⃣ Start from the aggressive_pool stored in DB.
+          2️⃣ Add realised P&L (equity – previous equity) – this is already
+             reflected in the DB because we call this AFTER the trade is logged.
+          3️⃣ Apply a volatility multiplier (optional – e.g., 1‑ATR/target_ATR).
+          4️⃣ Cap by the global‑risk‑budget (if the global controller has
+             reduced the per‑bucket risk_fraction, we honour it here).
+        """
+        # 1️⃣ Load current pools
+        aggressive, reserve = self._load_pools(bucket_id)
+
+        # 2️⃣ Realised P&L adjustment – equity already includes the P&L,
+        #    so the difference between the new equity and the previous
+        #    aggressive_pool gives us the net change.
+        #    (We assume `equity` passed in is the *post‑trade* equity.)
+        delta = equity - (aggressive + reserve)   # could be positive or negative
+        aggressive = max(0.0, aggressive + delta)  # never go negative
+
+        # 3️⃣ Volatility scaling (example: ATR‑based)
+        #    Pull the latest ATR from the DB or a cached metric.
+        #    For simplicity we use a static factor here; replace with your own.
+        vol_factor = cfg.get("volatility_risk_factor", 1.0)   # 1.0 = no scaling
+        aggressive *= vol_factor
+
+        # 4️⃣ Global risk‑budget cap (optional)
+        #    The global_risk_controller publishes `global_risk_percentage`.
+        #    If the overall risk budget is tight we shrink the aggressive pool.
+        #    Here we just demonstrate the hook – you can read the metric
+        #    via the Prometheus client if you want a live value.
+        #    Example (pseudo‑code):
+        #
+        #    from prometheus_api_client import PrometheusConnect
+        #    pc = PrometheusConnect(url="http://prometheus:9090")
+        #    global_pct = pc.get_current_metric_value("global_risk_percentage")
+        #    if global_pct > 0.90:   # >90 % of the 5 % cap
+        #        aggressive *= 0.5   # halve the usable capital
+
+        # Persist the updated aggressive pool back to DB
+        with engine.begin() as conn:
+            upd = (
+                update(bucket_meta)
+                .where(bucket_meta.c.bucket_id == bucket_id)
+                .values(aggressive_pool=aggressive)
+            )
+            conn.execute(upd)
+
+        # Finally, return the *usable* amount (i.e. aggressive pool)
+        return aggressive
+
+    # -----------------------------------------------------------------
+    # Existing `compute_stake` – now uses the dynamic usable capital
+    # -----------------------------------------------------------------
+    def compute_stake(self, bucket_id: int, equity: float) -> float:
+        """
+        Returns the dollar amount to risk on the next trade.
+        The stake is calculated as:
+            stake = usable_capital * risk_fraction_from_schedule
+        """
+        # 1️⃣ Get the risk fraction from the schedule (same as before)
+        trade_idx = get_trade_counter(bucket_id) + 1
+        if trade_idx in RISK_SCHEDULE:
+            risk_frac = RISK_SCHEDULE[trade_idx]
+        else:
+            risk_frac = RISK_SCHEDULE.get("default", 0.40)
+
+        # 2️⃣ Get the *usable* capital (aggressive pool) after the last trade
+        usable_capital = self.calculate_usable_capital(bucket_id, equity)
+
+        # 3️⃣ Apply the schedule fraction
+        stake = usable_capital * risk_frac
+        return stake
