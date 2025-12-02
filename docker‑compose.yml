@@ -325,6 +325,20 @@ services:
     ports:
       - "9091:9091"
     restart: unless-stopped
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/config.yml
+    ports:
+      - "9093:9093"
 
 
 
