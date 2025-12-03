@@ -310,3 +310,24 @@ def load_config() -> dict:
         baseline_portfolio_atr: 0.005   # 0.5 % of equity (tune after first week)
 max_drawdown_cap: 0.20         # static cap = 20 %
 
+brokers:
+  - name: mt5
+    type: mt5
+    vault_path: secret/data/citadel/brokers/mt5/account_1
+  - name: ibkr
+    type: ibkr
+    vault_path: secret/data/citadel/brokers/ibkr/account_1
+  - name: ctrader
+    type: ctrader
+    api_url: https://api.ctrader.com/v2
+    api_key: "<PLACEHOLDER>"   # will be pulled from Vault
+  - name: ninjatrader
+    type: ninjatrader
+    api_url: https://api.ninjatrader.com/v1
+    client_id: "<PLACEHOLDER>"
+    client_secret: "<PLACEHOLDER>"
+  - name: tradovate
+    type: tradovate
+    api_url: https://api.tradovate.com/v1
+    access_token: "<PLACEHOLDER>"
+
