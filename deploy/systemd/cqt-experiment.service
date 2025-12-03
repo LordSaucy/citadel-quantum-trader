@@ -1,0 +1,15 @@
+[Unit]
+Description=Run a single CQT experiment (WITH_LIR)
+After=network.target
+
+[Service]
+Type=oneshot
+Environment="POSTGRES_PASSWORD=SuperSecret123"
+Environment="EXP=WITH_LIR"
+Environment="TARGET_TRADES=5000"
+ExecStart=/usr/bin/python3 /opt/citadel/experiment/experiment_runner.py
+StandardOutput=append:/var/log/cqt-experiment.log
+StandardError=append:/var/log/cqt-experiment.err
+
+[Install]
+WantedBy=multi-user.target
