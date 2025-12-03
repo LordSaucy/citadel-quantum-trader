@@ -1,0 +1,66 @@
+name: Weekly Optimiser
+
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # every Monday 03:00 UTC
+  workflow_dispatch:      # manual trigger
+
+
+jobs:
+  optimise:
+    runs-on: ubuntu-latest
+    env:
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+      VAULT_TOKEN: ${{ secrets.VAULT_ROOT_TOKEN }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+
+    steps:
+      - name: Checkout repo (including data)
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0   # needed for git tagging later
+
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r optimizer/requirements.txt
+          pip install hvac   # Vault client
+
+
+      - name: Run optimiser (CMA‑ES)
+        run: |
+          python optimizer/run_opt.py \
+            --method cmaes \
+            --generations 30 \
+            --popsize 30 \
+            --seed $RANDOM
+
+
+      - name: Commit new config
+        env:
+          GIT_AUTHOR_NAME: "cqt‑optimiser"
+          GIT_AUTHOR_EMAIL: "optimiser@yourcompany.com"
+        run: |
+          git config user.name "$GIT_AUTHOR_NAME"
+          git config user.email "$GIT_AUTHOR_EMAIL"
+          git add config/new_config.yaml audit/*
+          git commit -m "Weekly optimiser run $(date +%F)"
+          git tag -a "opt-$(date +%F)" -m "Optimiser $(date +%F)"
+          git push origin HEAD --follow-tags
+
+
+      - name: Notify Slack
+        if: always()
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"✅ Weekly optimiser finished – best fitness $(cat optimizer/latest_score.txt) – config committed.\"}" \
+            $SLACK_WEBHOOK
