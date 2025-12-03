@@ -103,7 +103,89 @@ def main():
         print("⚠️ No live trades found for the given window.")
         return
 
+   # -------------------------------------------------------------
+    # ② Compute live‑paper metrics (gross & net are already stored)
     # -------------------------------------------------------------
-    # ② Compute live metrics (gross only – costs are already baked in)
+    live_total   = live_df['pnl'].sum()
+    live_wins    = live_df[live_df['pnl'] > 0]
+    live_losses  = live_df[live_df['pnl'] <= 0]
+
+    live_win_rate = (len(live_wins) / len(live_df)) * 100
+    live_avg_win  = live_wins['pnl'].mean() if not live_wins.empty else 0.0
+    live_avg_loss = live_losses['pnl'].mean() if not live_losses.empty else 0.0
+
+    # Profit factor (gross)
+    gross_profit = live_wins['pnl'].sum()
+    gross_loss   = abs(live_losses['pnl'].sum())
+    live_profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+
     # -------------------------------------------------------------
-    live_gross
+    # ③ Run the *same* back‑test on the historical slice
+    # -------------------------------------------------------------
+    backtest_analysis = run_backtest_on_slice(
+        symbol=args.symbol,
+        timeframe=args.timeframe,
+        start=start_dt,
+        end=end_dt,
+        strategy_func=generate_signals,   # your strategy function
+    )
+
+    # -------------------------------------------------------------
+    # ④ Print a concise comparison table
+    # -------------------------------------------------------------
+    def fmt(v):
+        """Pretty‑print numbers (2 decimals, % where appropriate)."""
+        if isinstance(v, float):
+            return f"{v:,.2f}"
+        return str(v)
+
+    print("\n===== LIVE PAPER‑TRADING vs. BACK‑TEST (same window) =====\n")
+    print("{:<30} {:>15} {:>15}".format("Metric", "Live Paper", "Back‑Test"))
+    print("-" * 62)
+
+    rows = [
+        ("Total P&L (net)",          live_total,                     backtest_analysis["net_total_profit"]),
+        ("Total P&L (gross)",        live_df["gross_profit"].sum() if "gross_profit" in live_df.columns else live_total,
+                                    backtest_analysis["gross_total_profit"]),
+        ("Win‑rate (%)",            live_win_rate,                  backtest_analysis["win_rate"]),
+        ("Avg. Win (net)",          live_avg_win,                   backtest_analysis["avg_win_net"]),
+        ("Avg. Loss (net)",         live_avg_loss,                  backtest_analysis["avg_loss_net"]),
+        ("Profit Factor",           live_profit_factor,             backtest_analysis["profit_factor"]),
+        ("Max Draw‑down (%)",       live_df["drawdown_pct"].min() if "drawdown_pct" in live_df.columns else float('nan'),
+                                    backtest_analysis["max_drawdown"]),
+        ("ROI % (net)",             (live_total / 10_000) * 100,   backtest_analysis["roi_pct_net"]),
+        ("Avg. Cost / Trade",       live_df["costs"].mean() if "costs" in live_df.columns else 0.0,
+                                    backtest_analysis["average_cost_per_trade"]),
+    ]
+
+    for name, live_val, back_val in rows:
+        print("{:<30} {:>15} {:>15}".format(name, fmt(live_val), fmt(back_val)))
+
+    print("\n✅ Comparison complete.\n")
+    # -------------------------------------------------------------
+    # ⑤ (Optional) Dump a JSON report for auditors / CI
+    # -------------------------------------------------------------
+    report = {
+        "window": {"symbol": args.symbol, "start": args.start, "end": args.end},
+        "live": {
+            "total_net": live_total,
+            "win_rate": live_win_rate,
+            "profit_factor": live_profit_factor,
+            "max_drawdown": live_df["drawdown_pct"].min() if "drawdown_pct" in live_df.columns else None,
+            "roi_pct": (live_total / 10_000) * 100,
+        },
+        "backtest": backtest_analysis,
+        "delta": {
+            "total_net_diff": live_total - backtest_analysis["net_total_profit"],
+            "win_rate_diff": live_win_rate - backtest_analysis["win_rate"],
+            "profit_factor_diff": live_profit_factor - backtest_analysis["profit_factor"],
+            "roi_pct_diff": (live_total / 10_000) * 100 - backtest_analysis["roi_pct_net"],
+        },
+    }
+
+    out_path = f"comparison_{args.symbol}_{args.start}_{args.end}.json"
+    with open(out_path, "w") as f:
+        json.dump(report, f, indent=2)
+    print(f"📁 Detailed JSON report written to {out_path}")
+
+    
