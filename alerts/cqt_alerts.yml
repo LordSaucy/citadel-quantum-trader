@@ -235,4 +235,33 @@ groups:
           summary: "Order latency > 200 ms for 30 s"
           description: "Latency spike detected – kill‑switch will be activated."
 
+groups:
+- name: citadel_alerts
+  rules:
+  - alert: LatencySpike
+    expr: histogram_quantile(0.95, sum(rate(order_latency_seconds_bucket[5m])) > 0.15
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: "95th‑percentile latency > 150 ms"
+      description: "Investigate depth guard, network, or broker API."
+
+  - alert: HighRejectRate
+    expr: sum(rate(order_failure_total[5m])) / sum(rate(order_total[5m])) > 0.02
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Order rejection rate > 2 %"
+      description: "Check broker limits, depth guard, or news‑sentiment filter."
+
+  - alert: KillSwitchActivated
+    expr: kill_switch_active == 1
+    for: 0m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Kill‑switch engaged!"
+      description: "All new entries are paused. Manual review required."
 
