@@ -1,0 +1,56 @@
+services:
+  # -----------------------------------------------------------------
+  # 1️⃣ Bot container – point to demo credentials via Vault
+  # -----------------------------------------------------------------
+  citadel-bot:
+    # Use the same image as production (built from the same Dockerfile)
+    image: citadel/trader:latest
+    # Override environment variables that the bot reads at start‑up
+    environment:
+      # Tell the bot to use the demo secret path (the Vault Agent will mount it)
+      VAULT_SECRET_PATH: "secret/data/citadel/demo_mt5"
+      # Optional: force a “paper” mode flag that your code can check
+      PAPER_MODE: "true"
+    # If you use a Vault Agent side‑car, mount its config (same as prod)
+    volumes:
+      - ./vault/agent.hcl:/etc/vault/agent.hcl:ro
+      - vault-secrets:/run/secrets   # shared secret volume
+    # Ensure the bot reads the secret at runtime (same as prod)
+    entrypoint: ["/bin/sh","-c","\
+        vault agent -config=/etc/vault/agent.hcl -exit-after-auth \
+        && python src/main.py"]
+    # No need to expose ports to the public – WireGuard already restricts access
+    networks:
+      - internal
+
+  # -----------------------------------------------------------------
+  # 2️⃣ (Optional) Separate PostgreSQL for paper‑trading
+  # -----------------------------------------------------------------
+  # If you want an isolated DB, uncomment the block below.
+  # Otherwise the bot will reuse the same DB as production – be sure you
+  # have a separate schema or a different DB name.
+  #
+  # citadel-db-paper:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_USER: citadel
+  #     POSTGRES_PASSWORD: paper_secret
+  #     POSTGRES_DB: citadel_paper
+  #   volumes:
+  #     - pgdata-paper:/var/lib/postgresql/data
+  #   networks:
+  #     - internal
+
+  # -----------------------------------------------------------------
+  # 3️⃣ Keep all the monitoring services (Prometheus, Grafana, etc.)
+  # -----------------------------------------------------------------
+  # They are unchanged – they will automatically scrape the paper bot
+  # because they are on the same Docker network.
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  vault-secrets:   # shared secret volume for the Vault Agent
+  # pgdata-paper:  # uncomment if you use a separate DB
