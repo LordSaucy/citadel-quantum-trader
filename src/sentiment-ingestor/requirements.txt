@@ -1,0 +1,8 @@
+feedparser==6.0.10          # RSS parsing
+requests==2.28.2
+pandas==2.0.3
+redis==5.0.0                # fast key‑value store
+transformers==4.34.0        # for FinBERT (optional)
+torch==2.0.1                # required by transformers
+vaderSentiment==3.3.2       # lightweight fallback
+schedule==1.2.0             # simple cron‑like scheduler
