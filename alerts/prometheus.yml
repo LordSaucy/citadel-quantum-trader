@@ -8,3 +8,17 @@ alerting:
 
 rule_files:
   - "cqt_alerts.yml"
+
+receivers:
+  - name: slack
+    slack_configs:
+      - api_url: '{{ file "/etc/alertmanager/slack_webhook" }}'
+        ...
+  - name: pagerduty
+    pagerduty_configs:
+      - service_key: '{{ file "/etc/alertmanager/pagerduty_key" }}'
+        ...
+  - name: telegram
+    telegram_configs:
+      - bot_token: '{{ file "/etc/alertmanager/telegram_token" }}'
+        ...
