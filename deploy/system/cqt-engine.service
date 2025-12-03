@@ -1,0 +1,29 @@
+[Unit]
+Description=Citadel Quantum Trader – Docker‑Compose stack (engine + FastAPI API)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+# Pull in the Docker‑Compose file from the repo location.
+# We assume the repo is cloned to /opt/cqt on the VPS.
+WorkingDirectory=/opt/cqt
+
+# Use Docker‑Compose v2 (the `docker compose` sub‑command)
+# – `-f` arguments are already baked into the compose file (engine + API)
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down --remove-orphans
+
+# Restart policy – if Docker itself crashes, systemd will restart the service.
+Restart=on-failure
+RestartSec=10
+
+# Give the service a reasonable timeout (default 90 s is fine)
+TimeoutStartSec=120
+TimeoutStopSec=120
+
+# Logging – forward Docker’s stdout/stderr to the journal.
+StandardOutput=journal
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target
