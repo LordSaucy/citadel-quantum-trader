@@ -4,6 +4,8 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from news_overlay import is_recent_high_impact
 from prometheus_client import Gauge
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from .config import logger, env
 from .risk_management import RiskManagementLayer
@@ -538,4 +540,11 @@ if __name__ == "__main__":
     bot = CitadelBot(cfg)
     threading.Thread(target=config_watcher, args=(bot,), daemon=True).start()
     bot.run()
+
+@app.get("/api/logs/{container_name}")
+async def sse_logs(container_name: str, user=Depends(get_current_user)):
+    async def event_generator():
+        async for line in _log_generator(container_name):
+            yield f"data: {line}\n\n"
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
