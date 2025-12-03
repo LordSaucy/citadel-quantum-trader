@@ -459,3 +459,32 @@ def sanity_check(params):
 ok, msg = sanity_check(best_params)
 if not ok:
     raise RuntimeError(f"Optimiser produced invalid config: {msg}")
+
+import hvac, base64, hashlib
+client = hvac.Client(url=os.getenv('VAULT_ADDR'), token=os.getenv('VAULT_TOKEN'))
+signing_key = client.secrets.transit.read_key(name='ledger_signing')['data']['keys'][0]['public_key']
+# Compute hash of the new_config.yaml
+with open('../config/new_config.yaml', 'rb') as f:
+    cfg_bytes = f.read()
+cfg_hash = hashlib.sha256(cfg_bytes).hexdigest()
+# Ask Vault to sign the hash (transit engine)
+signature_resp = client.secrets.transit.sign_data(
+    name='ledger_signing',
+    hash_algorithm='sha2-256',
+    input=cfg_hash
+)
+signature = signature_resp['data']['signature']
+# Persist both hash and signature for auditors
+audit_record = {
+    "date": datetime.utcnow().isoformat(),
+    "config_hash": cfg_hash,
+    "signature": signature,
+    "fitness": best_score,
+    "seed": args.seed,
+    "method": args.method,
+    "generations": args.generations,
+    "popsize": args.popsize
+}
+Path('../audit').mkdir(parents=True, exist_ok=True)
+(Path('../audit') / f'optimiser_{datetime.utcnow():%Y%m%d_%H%M%S}.json').write_text(json.dumps(audit_record, indent=2))
+
