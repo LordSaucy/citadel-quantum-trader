@@ -1092,3 +1092,10 @@ volumes:
   vault-secrets:
   logs:   # persists the shadow.log for later analysis
 
+# docker‑compose.yml (excerpt)
+services:
+  pushgateway:
+    image: prom/pushgateway:latest
+    ports:
+      - "9091:9091"
+    restart: unless-stopped
