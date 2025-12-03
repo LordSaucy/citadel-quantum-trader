@@ -272,3 +272,12 @@ receivers:
         channel: "#trading-alerts"
         send_resolved: true
 
+- alert: PgDumpFailed
+  expr: citadel_pg_dump_last_success == 0
+  for: 5m
+  labels:
+    severity: critical
+  annotations:
+    summary: "Nightly PostgreSQL dump failed"
+    description: "Check /var/log/citadel/pg_dump.log on the host. The dump job may have exited with an error."
+
