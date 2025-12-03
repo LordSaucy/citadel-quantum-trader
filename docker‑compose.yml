@@ -283,6 +283,15 @@ admin-frontend:
   expose:
     - "80"
 
+    admin-backend:
+  image: ghcr.io/yourorg/citadel-qt/admin-backend:latest
+  ...
+
+admin-frontend:
+  image: ghcr.io/yourorg/citadel-qt/admin-frontend:latest
+  ...
+
+
     # -------------------------------------------------
 # 8️⃣ Nginx reverse‑proxy (TLS termination)
 # -------------------------------------------------
