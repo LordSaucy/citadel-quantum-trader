@@ -123,3 +123,28 @@ async def signal_generator(feed_queue, signal_queue):
                 signal = compute_signal(market_data)
                 await signal_queue.put(signal)
 
+from event_utils import get_active_event
+from datetime import datetime, timezone
+
+def compute_confluence_score(features: dict) -> float:
+    """
+    Original CQT returns a float between 0 and 1.
+    We'll add a bias if we are inside an event window.
+    """
+    base_score = original_confluence_algorithm(features)   # existing 7‑lever SMC logic
+
+    # ----- EVENT BIAS -------------------------------------------------
+    now = datetime.now(timezone.utc)
+    ev = get_active_event(now)
+    if ev:
+        _, impact, _ = ev
+        # Map impact → bias (read from config.yaml at startup)
+        bias_map = {
+            'high':   CONFIG['event_window']['impact_bias']['high'],
+            'medium': CONFIG['event_window']['impact_bias']['medium'],
+            'low':    CONFIG['event_window']['impact_bias']['low'],
+        }
+        bias = bias_map.get(impact, 0.0)
+        base_score = min(1.0, base_score + bias)   # cap at 1.0
+    # ------------------------------------------------------------------
+    return base_score
