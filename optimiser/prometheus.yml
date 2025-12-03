@@ -2,3 +2,8 @@ scrape_configs:
   - job_name: "optimiser"
     static_configs:
       - targets: ["optimiser:8001"]
+
+scrape_configs:
+  - job_name: 'pushgateway'
+    static_configs:
+      - targets: ['pushgateway:9091']
