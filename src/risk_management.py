@@ -712,4 +712,14 @@ async def risk_manager(signal_queue, execution_queue):
                 # Existing risk‑checking logic
                 if passes_risk(signal):
                     await execution_queue.put(signal)
+def compute_stake(bucket_id: int, equity: float) -> float:
+    base_fraction = get_risk_fraction_from_schedule(bucket_id)   # 1.0, 0.6, 0.5, 0.4…
+    # Check event window
+    ev = get_active_event(datetime.now(timezone.utc))
+    if ev:
+        _, impact, _ = ev
+        if impact == 'high':
+            # e.g., add 0.2 % absolute (so 0.5 % → 0.7 %)
+            base_fraction = min(1.0, base_fraction + 0.002)
+    return equity * base_fraction
 
