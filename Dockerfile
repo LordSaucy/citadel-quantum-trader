@@ -191,4 +191,10 @@ ENTRYPOINT ["dumb-init", "--"]
 # The command starts the collector in the background and then the bot
 CMD bash -c "python -u src/data_ingest/collector.py & exec python -u src/main.py"
 
- 
+ # Add the new broker SDKs (or just requests if you use REST)
+RUN pip install --no-cache-dir \
+    ib_insync \
+    ctrader-sdk \
+    ninjatrader-sdk \
+    tradovate-api
+
