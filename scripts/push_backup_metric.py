@@ -31,3 +31,31 @@ if __name__ == "__main__":
         print("usage: push_backup_metric.py <seconds>", file=sys.stderr)
         sys.exit(1)
     push(float(sys.argv[1]))
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+# -----------------------------------------------------------------
+# Existing backup logic (pg_dump → S3) – keep unchanged
+# -----------------------------------------------------------------
+START_TS=$(date +%s)
+
+# Example: run pg_dump and upload to S3
+docker exec citadel-db pg_dump -U citadel citadel > /tmp/backup.sql
+aws s3 cp /tmp/backup.sql s3://citadel-audit/backup/backup_$(date +%Y%m%d_%H%M).sql
+
+END_TS=$(date +%s)
+DURATION=$(( END_TS - START_TS ))
+
+echo "✅ Backup completed in ${DURATION}s"
+
+# -----------------------------------------------------------------
+# NEW: push the duration metric to Prometheus Pushgateway
+# -----------------------------------------------------------------
+# The Pushgateway should be reachable from the host (e.g., running on
+# the same VPS on port 9091). If you run it inside Docker, expose it:
+#   docker run -d -p 9091:9091 prom/pushgateway
+#
+# Push the metric (ignore failures – we still want the backup to succeed)
+python3 /opt/citadel/scripts/push_backup_metric.py "${DURATION}" || true
+
