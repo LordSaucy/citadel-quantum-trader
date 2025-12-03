@@ -281,3 +281,9 @@ receivers:
     summary: "Nightly PostgreSQL dump failed"
     description: "Check /var/log/citadel/pg_dump.log on the host. The dump job may have exited with an error."
 
+receivers:
+- name: rollback-webhook
+  webhook_configs:
+  - url: http://127.0.0.1:9099/rollback   # a tiny Flask app you run locally
+    send_resolved: false
+
