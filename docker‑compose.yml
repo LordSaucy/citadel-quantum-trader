@@ -1111,3 +1111,21 @@ services:
     networks:
       - citadel-net
 
+ # -------------------------------------------------
+  # Existing services (vault, citadel‑bot, …)
+  # -------------------------------------------------
+
+  # -------------------------------------------------
+  # New Sentiment Ingestor
+  # -------------------------------------------------
+  sentiment:
+    build: ./sentiment          # Dockerfile we created earlier
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    depends_on:
+      - redis
+    networks:
+      - backend
