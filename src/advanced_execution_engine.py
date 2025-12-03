@@ -776,4 +776,27 @@ class AdvancedExecutionEngine:
     def _pip_size(self, symbol: str) -> float:
         from .metrics import PIP_VALUE   # already in your repo
         return PIP_VALUE.get(symbol, 0.0001)
+def _load_adapter(broker_type: str, cfg: dict):
+    mapping = {
+        "mt5": "mt5_adapter.MT5Adapter",
+        "ibkr": "ibkr_adapter.IBKRAdapter",
+        "ctrader": "ctrader_adapter.CTraderAdapter",
+        "ninjatrader": "ninjatrader_adapter.NinjaTraderAdapter",
+        "tradovate": "tradovate_adapter.TradovateAdapter",
+    }
+    if broker_type not in mapping:
+        raise ValueError(f"Unsupported broker_type: {broker_type}")
+
+    module_name, class_name = mapping[broker_type].split(".")
+    mod = importlib.import_module(f"src.{module_name}")
+    klass = getattr(mod, class_name)
+    return klass(cfg)
+
+class AdvancedExecutionEngine:
+    def __init__(self):
+        cfg = Config().settings
+        broker_type = cfg.get("broker_type", "mt5").lower()
+        self.broker = _load_adapter(broker_type, cfg)
+        if not self.broker.connect():
+            raise RuntimeError("Failed to connect to broker")
 
