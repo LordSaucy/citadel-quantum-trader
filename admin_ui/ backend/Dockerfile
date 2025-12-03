@@ -77,3 +77,6 @@ EXPOSE 8000
 USER cqt
 ENV PYTHONUNBUFFERED=1
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+COPY migrations/2025-11-30_add_aggressive_pool.sql /docker-entrypoint-initdb.d/
+
