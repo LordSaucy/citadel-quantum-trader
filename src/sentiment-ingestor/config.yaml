@@ -1,0 +1,21 @@
+# RSS feeds (list of URLs)
+rss_feeds:
+  - https://www.reuters.com/rssFeed/topNews
+  - https://feeds.npr.org/1001/rss.xml
+
+# Macro calendar API (example: US CPI from FRED)
+macro:
+  fred_api_key: "<YOUR_FRED_API_KEY>"
+  series_id: "CPIAUCSL"   # Consumer Price Index for All Urban Consumers
+  poll_interval_minutes: 30
+
+# Sentiment model choice: "finbert" or "vader"
+sentiment_model: "vader"
+
+# Redis connection (the same Redis you already use for CQT metrics)
+redis:
+  host: "redis"
+  port: 6379
+  db: 0
+  ttl_seconds: 86400   # keep sentiment for 24 h (auto‑expire)
+
