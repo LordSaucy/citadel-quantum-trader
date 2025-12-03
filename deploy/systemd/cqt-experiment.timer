@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Citadel Quantum Trader A/B experiment
+
+[Timer]
+OnCalendar=Sun 02:00:00
+Persistent=true
+Unit=cqt-experiment.service
+
+[Install]
+WantedBy=timers.target
