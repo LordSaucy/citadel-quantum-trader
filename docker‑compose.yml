@@ -1099,3 +1099,15 @@ services:
     ports:
       - "9091:9091"
     restart: unless-stopped
+
+     backup-exporter:
+    image: python:3.11-slim
+    container_name: citadel-backup-exporter
+    command: ["python", "/opt/backup/backup_exporter.py"]
+    volumes:
+      - backup-scripts:/opt/backup:ro
+    ports:
+      - "9110:9110"
+    networks:
+      - citadel-net
+
