@@ -1,0 +1,24 @@
+auth_enabled: false
+server:
+  http_listen_port: 3100
+  log_level: info
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /tmp/loki/boltdb-shipper-active
+    cache_location: /tmp/loki/boltdb-shipper-cache
+    shared_store: filesystem
+  filesystem:
+    directory: /tmp/loki/chunks
+chunk_target_size: 1048576
+table_manager:
+  retention_deletes_enabled: true
+  retention_period: 336h   # 14 days
