@@ -11,6 +11,8 @@ from pathlib import Path
 from fitness import fitness
 import numpy as np
 from datetime import datetime
+from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+
 
 # -----------------------------------------------------------------
 # Helper: convert a flat list of numbers into the dict expected by fitness()
@@ -423,3 +425,37 @@ def persist_best(run_id, cfg, fitness, metrics, notes=""):
     )
     conn.commit()
     conn.close()
+
+registry = CollectorRegistry()
+g_fitness = Gauge("cqt_opt_best_fitness", "Best fitness per generation", registry=registry)
+g_runtime = Gauge("cqt_opt_runtime_seconds", "Total optimiser runtime", registry=registry)
+
+# Inside the generation loop:
+g_fitness.set(best_score)
+
+# After the loop:
+g_runtime.set(time.time() - start_ts)
+push_to_gateway("pushgateway.mycompany.internal:9091", job="cqt_optimiser", registry=registry)
+
+def sanity_check(params):
+    # 1️⃣ Ensure risk schedule never exceeds 1.0 (100 %)
+    if any(r > 1.0 for r in params["risk_schedule"]):
+        return False, "Risk schedule > 100 %"
+
+    # 2️⃣ Verify SMC weights are positive (negative weights would invert signals)
+    if any(w <= 0 for w in params["smc_weights"]):
+        return False, "SMC weight <= 0"
+
+    # 3️⃣ Enforce a minimum RR (e.g., >= 3.0)
+    if params["rr_target"] < 3.0:
+        return False, "RR_target too low"
+
+    # 4️⃣ Max draw‑down must be <= 0.15 (15 %) – we never want a config that allows >15 %
+    if params["max_drawdown"] > 0.15:
+        return False, "max_drawdown > 15%"
+
+    return True, "OK"
+
+ok, msg = sanity_check(best_params)
+if not ok:
+    raise RuntimeError(f"Optimiser produced invalid config: {msg}")
