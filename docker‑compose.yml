@@ -1212,3 +1212,9 @@ admin-backend:
     - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY}
     - RARE_EVENT_S3_BUCKET=${RARE_EVENT_S3_BUCKET}
 
+citadel-bot:
+  ...
+  secrets:
+    - citadel_config
+  volumes:
+    - /run/secrets/citadel_config:/app/config/config.yaml:ro
