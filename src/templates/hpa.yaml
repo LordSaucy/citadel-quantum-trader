@@ -1,0 +1,20 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "citadel.fullname" . }}-hpa
+  labels:
+    {{- include "citadel.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "citadel.fullname" . }}
+  minReplicas: {{ .Values.replicaCount | default 6 }}
+  maxReplicas: 200                 # <-- adjust after you know your budget
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70   # <-- 70 % of a *single* CPU core per pod
