@@ -21,3 +21,75 @@
   },
   "overwrite": true
 }
+{
+  "datasource": "Prometheus",
+  "fieldConfig": {
+    "defaults": {
+      "unit": "short",
+      "decimals": 0,
+      "thresholds": {
+        "mode": "absolute",
+        "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 10 },
+          { "color": "red", "value": 50 }
+        ]
+      }
+    },
+    "overrides": []
+  },
+  "gridPos": { "h": 4, "w": 12, "x": 0, "y": 26 },
+  "id": 8,
+  "options": {
+    "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "auto",
+    "textMode": "auto"
+  },
+  "targets": [
+    {
+      "expr": "arb_guard_hits_total",
+      "legendFormat": "Guard Hits",
+      "refId": "A"
+    }
+  ],
+  "title": "Arb Guard Hits",
+  "type": "stat"
+},
+{
+  "datasource": "Prometheus",
+  "fieldConfig": {
+    "defaults": {
+      "unit": "short",
+      "decimals": 0,
+      "thresholds": {
+        "mode": "absolute",
+        "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 5 },
+          { "color": "red", "value": 20 }
+        ]
+      }
+    },
+    "overrides": []
+  },
+  "gridPos": { "h": 4, "w": 12, "x": 12, "y": 26 },
+  "id": 9,
+  "options": {
+    "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+    "colorMode": "value",
+    "graphMode": "none",
+    "justifyMode": "auto",
+    "textMode": "auto"
+  },
+  "targets": [
+    {
+      "expr": "arb_success_total",
+      "legendFormat": "Arb Successes",
+      "refId": "A"
+    }
+  ],
+  "title": "Arb Successes",
+  "type": "stat"
+}
