@@ -723,3 +723,17 @@ def compute_stake(bucket_id: int, equity: float) -> float:
             base_fraction = min(1.0, base_fraction + 0.002)
     return equity * base_fraction
 
+class RiskManager:
+    def __init__(self):
+        self.trade_counter = 0
+        self.guard_limit = int(os.getenv("GUARD_TRADE_LIMIT", "20"))
+
+    def on_trade_executed(self, trade):
+        self.trade_counter += 1
+        if self.trade_counter <= self.guard_limit:
+            # Log aggressively; if something looks off, raise an alert
+            self.logger.info("[GUARD] Trade %d – P&L %.2f", self.trade_counter, trade.pnl)
+            if trade.pnl < -0.02 * self.account_equity:   # example: >2 % loss on a single trade
+                self.logger.error("[GUARD] Large loss detected – triggering rollback")
+                # Touch a rollback flag that the watcher will see
+                open("/opt/config/rollback.flag", "w").close()
