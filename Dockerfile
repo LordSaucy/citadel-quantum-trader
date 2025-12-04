@@ -223,3 +223,23 @@ EXPOSE 8005
 
 # Entrypoint – run uvicorn with the FastAPI app
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8005"]
+
+version: "3.9"
+
+services:
+  engine:
+    # Image built from the combined Dockerfile (engine + FastAPI)
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:${IMAGE_TAG:-latest}
+    container_name: cqt-engine
+    restart: unless-stopped
+    env_file: [.env]                     # static defaults (non‑secret)
+    secrets:
+      - POSTGRES_PASSWORD
+      - CQT_API_TOKEN
+      - MT5_PASSWORD
+      - IBKR_API_KEY
+      - IBKR_SECRET
+    ports:
+      - "8005:8005"                     # **Both** Flask API (/healthz, /config…) **and** FastAPI control API
+    networks:
+      - cqt-net
