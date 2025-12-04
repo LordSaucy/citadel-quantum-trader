@@ -1,4 +1,6 @@
 import os
+from metrics.prometheus import start_prometheus
+
 from flask import Flask, jsonify
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
@@ -36,6 +38,7 @@ from src.risk.volatility_scaler import scale_risk
 from src.risk.session_manager import allowed_now
 
 
+start_prometheus(port=9090)   # expose on 0.0.0.0:9090 (already mapped in docker‑compose)
 
 # ----------------------------------------------------------------------
 # Flask app factory
