@@ -38,3 +38,10 @@ export default function StreakPanel({ bucketId }: { bucketId: number }) {
     </Card>
   );
 }
+
+@app.get("/api/metrics/streaks")
+async def get_streaks(bucket_id: int, user=Depends(get_current_user)):
+    win = streak_wins.labels(bucket_id=str(bucket_id))._value.get() or 0
+    loss = streak_losses.labels(bucket_id=str(bucket_id))._value.get() or 0
+    return {"win": int(win), "loss": int(loss)}
+
