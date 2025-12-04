@@ -888,3 +888,19 @@ def on_order_filled(self, order_id, fill_price, fill_timestamp):
         self.broker.maybe_fallback_based_on_latency(order_id, latency)
 
     # Continue with slippage calculation as shown in section 1.2…
+
+class AdvancedExecutionEngine:
+    def __init__(self, *, shadow=False, **kwargs):
+        self.shadow = shadow
+        # … existing init …
+
+    def send_order(self, order):
+        if self.shadow:
+            # Log what would have happened, but do not call the broker API
+            self.logger.info("[SHADOW] WOULD SEND %s", order)
+            # Optionally write to a dedicated shadow DB/table for later analysis
+            self._record_shadow(order)
+            return {"status": "shadowed"}
+        # Normal path – actual broker call
+        return self.broker_api.send(order)
+
