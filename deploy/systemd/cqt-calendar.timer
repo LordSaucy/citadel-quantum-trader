@@ -1,0 +1,13 @@
+# ------------------------------------------------------------
+# cqt-calendar.timer – triggers the fetch every day at 02:00 UTC
+# ------------------------------------------------------------
+[Unit]
+Description=Run CQT economic‑calendar fetch daily at 02:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true          # Run if the VM was down at the scheduled time
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
