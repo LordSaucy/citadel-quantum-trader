@@ -130,3 +130,66 @@
   "colorMode": "value",
   "thresholds": "0.1,0.2"
 }
+
+{
+  "type": "stat",
+  "title": "Winning Streak (per bucket)",
+  "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+  "targets": [
+    {
+      "refId": "A",
+      "expr": "max(bucket_streak_wins) by (bucket_id)",
+      "legendFormat": "{{bucket_id}}"
+    }
+  ],
+  "options": {
+    "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+  },
+  "fieldConfig": {
+    "defaults": {
+      "thresholds": {
+        "mode": "absolute",
+        "steps": [
+          { "value": null, "color": "green" },   // 0‑2 → green
+          { "value": 3,    "color": "orange" }, // 3‑4 → orange
+          { "value": 5,    "color": "red" }     // ≥5 → red
+        ]
+      },
+      "unit": "short"
+    }
+  }
+},
+{
+  "type": "stat",
+  "title": "Losing Streak (per bucket)",
+  "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+  "targets": [
+    {
+      "refId": "B",
+      "expr": "max(bucket_streak_losses) by (bucket_id)",
+      "legendFormat": "{{bucket_id}}"
+    }
+  ],
+  "options": {
+    "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+  },
+  "fieldConfig": {
+    "defaults": {
+      "thresholds": {
+        "mode": "absolute",
+        "steps": [
+          { "value": null, "color": "green" },
+          { "value": 3,    "color": "orange" },
+          { "value": 5,    "color": "red" }
+        ]
+      },
+      "unit": "short"
+    }
+  }
+}
