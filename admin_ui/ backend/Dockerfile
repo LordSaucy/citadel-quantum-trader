@@ -12,6 +12,7 @@ ARG BUILD_UID=1000
 ARG BUILD_GID=1000
 RUN addgroup --gid $BUILD_GID builder && \
     adduser --uid $BUILD_UID --gid $BUILD_GID --disabled-password --gecos "" builder
+    
 
 WORKDIR /app
 
@@ -90,3 +91,16 @@ CMD ["cron", "-f"]
 
 COPY src/regime_ensemble.py src/garch_vol.py src/metrics.py /app/src/
 
+FROM postgres:15
+
+# Install the AWS CLI v2 (official installer)
+RUN apt-get update && \
+    apt-get install -y curl unzip gnupg && \
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    rm -rf awscliv2.zip aws && \
+    apt-get purge -y --auto-remove curl unzip gnupg && \
+    rm -rf /var/lib/apt/lists/*
+
+# (Optional) set a non‑root user – you already run the container as the default postgres user.
