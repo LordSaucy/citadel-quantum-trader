@@ -286,3 +286,19 @@ groups:
     annotations:
       summary: "Very high LIR ({{ $value }}) on bucket {{ $labels.bucket_id }}"
       description: "Market is heavily one‑sided; consider tightening risk‑fraction."
+
+      groups:
+  - name: ledger.rules
+    rules:
+      - alert: LedgerSnapshotFailed
+        expr: ledger_snapshot_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Hourly ledger snapshot failed"
+          description: |
+            The Merkle‑root + signature could not be uploaded to S3 for the last hour.
+            Check the `ledger-snapshot-exporter` container logs and the IAM permissions
+            for the KMS key and S3 bucket.
+
