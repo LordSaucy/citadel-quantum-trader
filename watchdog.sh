@@ -1,78 +1,180 @@
 #!/usr/bin/env bash
-# -------------------------------------------------
-# Citadel Quantum Trader – Watchdog (fail‑over)
-# -------------------------------------------------
-# Configurable vars – edit to match your environment
-HEALTH_URL="http://localhost:8000/health"
-PROM_URL="http://prometheus:9090"
-FLOATING_IP_ID="YOUR_FLOATING_IP_ID"
-PRIMARY_HOST="primary-vps-hostname-or-ip"
-STANDBY_HOST="standby-vps-hostname-or-ip"
-STANDBY_DROPLET_ID="YOUR_STANDBY_CLOUD_ID"
-MAX_FAILS=3
-INTERVAL=30   # seconds between checks
-WEBHOOK="${SLACK_WEBHOOK_URL:-}"   # optional Slack webhook for alerts
+# =============================================================================
+# Citadel Quantum Trader – Full‑HA Watchdog & Automatic Fail‑Over
+# =============================================================================
+# What it does (in order):
+#   1️⃣  Periodically checks three health indicators:
+#        • FastAPI health endpoint
+#        • Prometheus readiness endpoint
+#        • PostgreSQL replication lag (via Prometheus)
+#   2️⃣  If ANY indicator fails for MAX_FAILURES consecutive checks → trigger fail‑over.
+#   3️⃣  Move the floating IP to the *other* droplet.
+#   4️⃣  Promote the PostgreSQL replica on the new primary (if needed).
+#   5️⃣  Pull latest Docker images and restart the full Docker‑Compose stack.
+#   6️⃣  Update droplet tags so the next fail‑over knows which is primary/standby.
+#   7️⃣  Reset the failure counter and continue monitoring.
+#
+# The script is written for **DigitalOcean** (`doctl`).  Replace the
+# `move_floating_ip()` function with the equivalent CLI/API calls for AWS,
+# Hetzner, Linode, etc.
+# =============================================================================
 
+# --------------------------- CONFIGURATION -------------------------------
+FLOAT_IP="203.0.113.42"                # Your floating IP address
+PRIMARY_TAG="citadel-primary"          # Tag identifying the primary droplet
+STANDBY_TAG="citadel-standby"          # Tag identifying the standby droplet
+
+HEALTH_URL="http://127.0.0.1:8000/health"   # CQT FastAPI health endpoint (local)
+PROM_URL="http://127.0.0.1:9090"            # Prometheus endpoint (local)
+MAX_FAILURES=3                         # Consecutive failures before fail‑over
+INTERVAL=30                            # Seconds between health checks
+SSH_KEY="~/.ssh/id_rsa"                # SSH private key for root login
+REMOTE_USER="root"                     # User for SSH (Vultr droplets default to root)
+
+# Optional alerting (Slack, Teams, Discord, etc.)
+WEBHOOK="${SLACK_WEBHOOK_URL:-}"       # Set env var SLACK_WEBHOOK_URL if you want alerts
+
+# --------------------------- HELPERS ------------------------------------
+log() {
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "$ts [watchdog] $*" | tee -a /var/log/citadel/watchdog.log
+    if [[ -n "$WEBHOOK" ]]; then
+        curl -s -X POST -H 'Content-Type: application/json' \
+            -d "{\"text\":\"$ts watchdog: $*\"}" "$WEBHOOK" >/dev/null
+    fi
+}
+
+# ---- Provider‑specific floating‑IP move (DigitalOcean) -----------------
+move_floating_ip() {
+    local target_id=$1
+    log "Moving floating IP $FLOAT_IP → droplet $target_id"
+    # ---- DIGITALOCEAN -------------------------------------------------
+    doctl compute floating-ip-action assign "$FLOAT_IP" "$target_id"
+    # ---- If you use another provider, replace the line above with the
+    #      equivalent CLI/API call (AWS Elastic IP, Hetzner Floating IP, etc.)
+}
+
+# ---- Simple HTTP health check – returns HTTP status code ----------
+check_http() {
+    local url=$1
+    curl -s -o /dev/null -w "%{http_code}" "$url"
+}
+
+# ---- FastAPI health -------------------------------------------------
+check_fastapi() {
+    rc=$(check_http "$HEALTH_URL")
+    [[ "$rc" == "200" ]]
+}
+
+# ---- Prometheus readiness -------------------------------------------
+check_prometheus() {
+    rc=$(check_http "$PROM_URL/-/ready")
+    [[ "$rc" == "200" ]]
+}
+
+# ---- Replication lag (via Prometheus) -------------------------------
+# Returns true if lag < 5 seconds, false otherwise.
+check_replication_lag() {
+    local lag
+    lag=$(curl -s "$PROM_URL/api/v1/query?query=pg_replication_lag_seconds" |
+          jq -r '.data.result[0].value[1]' 2>/dev/null || echo "")
+    if [[ -z "$lag" ]]; then
+        log "⚠️  Replication lag metric unavailable."
+        return 1
+    fi
+    # Fail if lag > 5 seconds
+    awk "BEGIN{exit ($lag > 5)}"
+}
+
+# -----------------------------------------------------------------------
+# MAIN LOOP
+# -----------------------------------------------------------------------
 fail_count=0
 
-log() {
-  ts=$(date '+%Y-%m-%d %H:%M:%S')
-  echo "$ts [watchdog] $1" | tee -a /var/log/citadel/watchdog.log
-  [[ -n "$WEBHOOK" ]] && curl -s -X POST -H 'Content-Type: application/json' \
-    -d "{\"text\":\"$ts watchdog: $1\"}" "$WEBHOOK" >/dev/null
-}
-
-check_health() {
-  rc=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL")
-  [[ "$rc" == "200" ]]
-}
-
-check_prometheus() {
-  # Simple query to ensure Prometheus is up
-  rc=$(curl -s -o /dev/null -w "%{http_code}" "$PROM_URL/-/ready")
-  [[ "$rc" == "200" ]]
-}
-
-check_replication_lag() {
-  # Returns true if lag < 5 seconds
-  lag=$(curl -s "$PROM_URL/api/v1/query?query=pg_replication_lag_seconds" \
-    | jq -r '.data.result[0].value[1]' 2>/dev/null || echo "")
-  [[ -z "$lag" ]] && return 1   # no metric → fail
-  awk "BEGIN{exit ($lag > 5)}"   # fail if >5 s
-}
-
-# -------------------------------------------------
-# Main loop
-# -------------------------------------------------
 while true; do
-  ok=0
-  check_health && ok=$((ok+1))
-  check_prometheus && ok=$((ok+1))
-  check_replication_lag && ok=$((ok+1))
+    ok=0
+    check_fastapi && ok=$((ok+1))
+    check_prometheus && ok=$((ok+1))
+    check_replication_lag && ok=$((ok+1))
 
-  if (( ok < 3 )); then
-    ((
+    if (( ok < 3 )); then
+        ((fail_count++))
+        log "Health check FAILED (ok=$ok). Failure #$fail_count"
+    else
+        if (( fail_count > 0 )); then
+            log "Health check PASSED – resetting failure counter."
+        fi
+        fail_count=0
+    fi
 
-ROLLBACK() {
-  echo "🔄 Initiating automatic rollback..."
+    # ---------------------------------------------------------------
+    # Trigger fail‑over once we exceed the allowed number of failures
+    # ---------------------------------------------------------------
+    if (( fail_count >= MAX_FAILURES )); then
+        log "=== FAIL‑OVER INITIATED ==="
 
-  # Read the previously known good tag
-  PREV_TAG=$(cat /opt/citadel/state/last_good_tag.txt || echo "latest")
-  echo "🔁 Switching to previous tag: $PREV_TAG"
+        # ----------- 1️⃣  Identify current floating‑IP owner -----------
+        CURRENT_OWNER=$(doctl compute floating-ip get "$FLOAT_IP" \
+                         --format DropletID --no-header)
 
-  # Update the compose file on‑the‑fly (sed is safe because we only replace the tag)
-  sed -i "s/$$image: citadel\/trader:$$.*/\1$PREV_TAG/" /opt/citadel/docker-compose.yml
+        # ----------- 2️⃣  Resolve droplet IDs for primary & standby ----
+        PRIMARY_ID=$(doctl compute droplet list --tag-name "$PRIMARY_TAG" \
+                         --format ID --no-header | head -n1)
+        STANDBY_ID=$(doctl compute droplet list --tag-name "$STANDBY_TAG" \
+                         --format ID --no-header | head -n1)
 
-  # Redeploy the bot container only
-  docker compose up -d citadel-bot
+        if [[ -z "$PRIMARY_ID" || -z "$STANDBY_ID" ]]; then
+            log "ERROR: Could not resolve droplet IDs for tags $PRIMARY_TAG / $STANDBY_TAG"
+            exit 1
+        fi
 
-  # Record the rollback as the new “last good” version
-  echo "$PREV_TAG" > /opt/citadel/state/last_good_tag.txt
-}
+        # ----------- 3️⃣  Decide which node becomes the new primary ----
+        if [[ "$CURRENT_OWNER" == "$PRIMARY_ID" ]]; then
+            # Primary currently holds the floating IP → move it to standby
+            TARGET_ID=$STANDBY_ID
+            NEW_PRIMARY_TAG=$STANDBY_TAG
+            NEW_STANDBY_TAG=$PRIMARY_TAG
+        else
+            # Standby already holds the floating IP → move it to primary
+            TARGET_ID=$PRIMARY_ID
+            NEW_PRIMARY_TAG=$PRIMARY_TAG
+            NEW_STANDBY_TAG=$STANDBY_TAG
+        fi
 
-if (( fail_count >= MAX_FAILS )); then
-  log "🚨 Health check failed $fail_count times – attempting rollback"
-  ROLLBACK
-  fail_count=0   # reset counter after rollback
-fi
+        # ----------- 4️⃣  Move the floating IP ------------------------
+        move_floating_ip "$TARGET_ID"
 
+        # ----------- 5️⃣  Promote PostgreSQL on the new primary -------
+        NEW_PRIMARY_IP=$(doctl compute droplet get "$TARGET_ID" \
+                         --format PrivateIPv4 --no-header)
+        log "Promoting PostgreSQL replica on new primary ($NEW_PRIMARY_IP)..."
+        ssh -i "$SSH_KEY" "$REMOTE_USER@$NEW_PRIMARY_IP" bash -s <<'EOSSH'
+docker exec -i citadel-db-standby pg_ctl -D /var/lib/postgresql/data -w promote
+EOSSH
+
+        # ----------- 6️⃣  Restart the Docker‑Compose stack -------------
+        log "Restarting CQT Docker stack on $NEW_PRIMARY_IP..."
+        ssh -i "$SSH_KEY" "$REMOTE_USER@$NEW_PRIMARY_IP" bash -s <<'EOSSH'
+cd /opt/cqt
+docker compose pull          # pull latest images (optional but recommended)
+docker compose up -d        # start / restart all services
+EOSSH
+
+        # ----------- 7️⃣  Update droplet tags -------------------------
+        log "Updating droplet tags: $NEW_PRIMARY_TAG ← primary, $NEW_STANDBY_TAG ← standby"
+        # Remove old tags
+        doctl compute droplet remove-tag "$PRIMARY_ID" "$PRIMARY_TAG"
+        doctl compute droplet remove-tag "$STANDBY_ID" "$STANDBY_TAG"
+        # Apply new tags
+        doctl compute droplet add-tag "$TARGET_ID" "$NEW_PRIMARY_TAG"
+        OTHER_ID=$(( TARGET_ID == PRIMARY_ID ? STANDBY_ID : PRIMARY_ID ))
+        doctl compute droplet add-tag "$OTHER_ID" "$NEW_STANDBY_TAG"
+
+        # ----------- 8️⃣  Reset failure counter -----------------------
+        fail_count=0
+        log "=== FAIL‑OVER COMPLETE === New primary: $NEW_PRIMARY_TAG (droplet $TARGET_ID) ==="
+    fi
+
+    sleep "$INTERVAL"
+done
