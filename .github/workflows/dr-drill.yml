@@ -1,0 +1,17 @@
+name: DR Drill Smoke Test
+on:
+  push:
+    paths:
+      - 'scripts/dr_drill.sh'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Docker & AWS CLI
+        run: |
+          sudo apt-get update && sudo apt-get install -y docker.io awscli
+      - name: Run DR drill in dry‑run mode
+        env:
+          DRY_RUN: true
+        run: ./scripts/dr_drill.sh
