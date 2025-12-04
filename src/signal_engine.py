@@ -19,6 +19,13 @@ def build_feature_vector(self, symbol: str, bucket_id: int) -> dict:
     features["depth"] = total_depth
     return features
 
+def compute_confluence_score(self, features: dict) -> float:
+    total = 0.0
+    for name, value in features.items():
+        weight = self.cfg["optimiser"]["weights"].get(name, 0.0)
+        total += weight * float(value)
+    return total
+
 
 def should_trade(regime_label: str, other_factors: dict) -> bool:
     # Existing 7‑lever SMC check ...
