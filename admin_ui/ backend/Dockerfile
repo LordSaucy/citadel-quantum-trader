@@ -80,3 +80,5 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 COPY migrations/2025-11-30_add_aggressive_pool.sql /docker-entrypoint-initdb.d/
 
+RUN apt-get update && apt-get install -y libta-lib0 libta-lib-dev
+
