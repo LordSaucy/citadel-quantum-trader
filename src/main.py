@@ -564,3 +564,7 @@ class ConfigReloader(FileSystemEventHandler):
 observer = Observer()
 observer.schedule(ConfigReloader(engine), path="/app/config", recursive=False)
 observer.start()
+
+if redis.get("kill_switch_active") == b"1":
+    logger.info("Kill‑switch active – skipping trade")
+    continue   # go to next iteration, no new entry
