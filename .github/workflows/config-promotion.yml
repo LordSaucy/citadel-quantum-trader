@@ -1,0 +1,20 @@
+name: Promote Config
+
+on:
+  pull_request:
+    paths:
+      - 'config/config.yaml'
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify checksum
+        run: |
+          sha256sum config/config.yaml > checksum.txt
+          git diff --quiet HEAD~1 checksum.txt || { echo "Checksum changed!"; exit 1; }
+      - name: Deploy (Docker‑Compose)
+        if: github.event.pull_request.merged == true
+        run: |
+          docker compose up -d --no-deps --build citadel-bot
