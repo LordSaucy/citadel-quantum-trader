@@ -88,4 +88,5 @@ COPY cronjob /etc/cron.d/drift
 RUN chmod 0644 /etc/cron.d/drift && crontab /etc/cron.d/drift
 CMD ["cron", "-f"]
 
+COPY src/regime_ensemble.py src/garch_vol.py src/metrics.py /app/src/
 
