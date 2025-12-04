@@ -180,3 +180,16 @@ if not enough_volume:
     depth_guard_rejections.labels(bucket_id=str(bucket_id), symbol=symbol).inc()
     return False
 
+depth_price_gauge = Gauge(
+    "cqt_market_depth_price_bucket",
+    "Depth per price bucket (bid or ask)",
+    ["bucket_id", "symbol", "price", "side"]   # side = "bid" or "ask"
+)
+for _, row in dom_df.iterrows():
+    depth_price_gauge.labels(
+        bucket_id=str(bucket_id),
+        symbol=symbol,
+        price=f"{row['price']:.5f}",
+        side="bid" if row['bid_volume'] > 0 else "ask"
+    ).set(row['bid_volume'] if row['bid_volume'] > 0 else row['ask_volume'])
+ 
