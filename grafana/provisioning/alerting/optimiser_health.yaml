@@ -1,0 +1,15 @@
+# grafana/provisioning/alerting/optimiser_health.yaml
+apiVersion: 1
+groups:
+  - name: "Optimiser‑Health"
+    interval: 5m
+    rules:
+      - alert: OptimiserFailed
+        expr: optimiser_last_fitness == 0
+        for: 5m
+        annotations:
+          summary: "Optimiser reported zero fitness"
+          description: "The optimiser either failed to converge or encountered an error during the last run."
+        labels:
+          severity: critical
+          channel: slack
