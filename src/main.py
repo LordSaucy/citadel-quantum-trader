@@ -22,6 +22,9 @@ from ledger import LedgerWriter
 from risk_management_layer import RiskManager
 from signal_generator import SignalEngine
 from prometheus_client import start_http_server, Counter
+import time, os, yaml
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 
 # ----------------------------------------------------------------------
@@ -548,3 +551,16 @@ async def sse_logs(container_name: str, user=Depends(get_current_user)):
             yield f"data: {line}\n\n"
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+class ConfigReloader(FileSystemEventHandler):
+    def __init__(self, engine):
+        self.engine = engine
+
+    def on_modified(self, event):
+        if event.src_path.endswith("config.yaml"):
+            with open(event.src_path) as f:
+                new_cfg = yaml.safe_load(f)
+            self.engine.update_config(new_cfg)   # you’ll need to expose this method
+
+observer = Observer()
+observer.schedule(ConfigReloader(engine), path="/app/config", recursive=False)
+observer.start()
