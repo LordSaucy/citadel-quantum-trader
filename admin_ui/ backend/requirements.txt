@@ -9,3 +9,5 @@ aiohttp==3.9.*
 docker==7.0.*
 prometheus-api-client==0.5.*
 PyYAML==6.0
+
+websockets==12.0
