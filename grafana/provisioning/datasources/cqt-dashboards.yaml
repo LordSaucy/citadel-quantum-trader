@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: "CQT Dashboards"
+    orgId: 1
+    folder: "Citadel QTR"          # Grafana will create (or reuse) this folder
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 60      # how often Grafana rescans the folder
+    options:
+      path: /etc/grafana/dashboards   # <-- this is the absolute path *inside* the container
