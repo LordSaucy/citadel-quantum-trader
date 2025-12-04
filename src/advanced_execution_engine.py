@@ -524,7 +524,8 @@ self.risk_manager.calculate_usable_capital(bucket_id=self.bucket_id,
 
 def on_order_filled(self, order_id, fill_price, fill_timestamp):
     # Retrieve the stored submission info (you can keep a dict keyed by order_id)
-    sub = self.submissions.pop(order_id, None)
+    sub = self.submissions = {}  # key: order_id → {"submit_ts":…, "submit_price":…, "symbol":…, "side":…}
+
     if not sub:
         # No submission record – maybe a manual order; just log and return
         self.logger.warning(f"Fill received for unknown order {order_id}")
