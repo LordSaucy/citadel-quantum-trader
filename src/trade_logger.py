@@ -525,5 +525,14 @@ def _update_streak(bucket_id: int, is_win: bool):
             "ts": datetime.utcnow().isoformat(),
         }
         self._store_entry(loss_entry)
+def _persist_streak(bucket_id: int, win_streak: int, loss_streak: int):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO streaks (bucket_id, ts, win_streak, loss_streak) "
+                "VALUES (:bid, now(), :ws, :ls)"
+            ),
+            {"bid": bucket_id, "ws": win_streak, "ls": loss_streak},
+        )
 
 
