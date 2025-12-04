@@ -345,3 +345,15 @@ optimiser:
     # NEW – liquidity related
     lir: 0.15               # LIR contributes 15 % of the total confluence score
     depth: 0.05             # Small positive weight for sheer market depth
+
+signal:
+  lir_min_abs: 0.30          # block trades unless LIR magnitude ≥ 30 %
+risk:
+  depth_min_units: 20000    # depth‑guard requires ≥ 20 k contract units
+optimiser:
+  weights:
+    lir: 0.15
+    depth: 0.05
+    # … other weights …
+
+
