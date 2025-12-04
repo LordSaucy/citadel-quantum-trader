@@ -1,0 +1,109 @@
+{
+  "dashboard": {
+    "uid": "cqt-liquidity",
+    "title": "CQT – Liquidity & LIR",
+    "tags": ["cqt","liquidity"],
+    "timezone": "browser",
+    "editable": true,
+    "panels": [
+      {
+        "type": "graph",
+        "title": "Liquidity Imbalance Ratio (LIR) – per bucket",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "cqt_liquidity_imbalance_ratio",
+            "legendFormat": "{{bucket_id}} – {{symbol}}",
+            "interval": ""
+          }
+        ],
+        "yaxes": [
+          { "format": "percent", "label": "LIR", "logBase": 1, "min": -1, "max": 1 },
+          { "format": "short", "show": false }
+        ],
+        "lines": true,
+        "fill": 1,
+        "linewidth": 2,
+        "tooltip": { "shared": true, "sort": 0 }
+      },
+      {
+        "type": "stat",
+        "title": "Total Market Depth (units)",
+        "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "B",
+            "expr": "cqt_total_market_depth",
+            "legendFormat": "{{bucket_id}} – {{symbol}}",
+            "interval": ""
+          }
+        ],
+        "format": "short",
+        "colorMode": "value",
+        "graphMode": "none",
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "auto",
+          "textMode": "value"
+        }
+      },
+      {
+        "type": "heatmap",
+        "title": "DOM Heat‑Map (Bid/Ask depth by price)",
+        "gridPos": { "x": 0, "y": 8, "w": 18, "h": 10 },
+        "targets": [
+          {
+            "refId": "C",
+            "expr": "cqt_market_depth_price_bucket",
+            "legendFormat": "{{price}} – {{side}}",
+            "interval": ""
+          }
+        ],
+        "heatmap": {
+          "color": { "mode": "palette-classic" },
+          "legend": { "show": true },
+          "tooltip": { "show": true }
+        },
+        "yAxis": { "format": "short" },
+        "xAxis": { "format": "short" }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "bucket_id",
+          "type": "query",
+          "datasource": "Prometheus",
+          "definition": "label_values(cqt_liquidity_imbalance_ratio, bucket_id)",
+          "includeAll": true,
+          "multi": true,
+          "refresh": 1,
+          "sort": 1,
+          "hide": 0
+        },
+        {
+          "name": "symbol",
+          "type": "query",
+          "datasource": "Prometheus",
+          "definition": "label_values(cqt_liquidity_imbalance_ratio, symbol)",
+          "includeAll": true,
+          "multi": true,
+          "refresh": 1,
+          "sort": 1,
+          "hide": 0
+        }
+      ]
+    },
+    "time": { "from": "now-6h", "to": "now" },
+    "refresh": "5s",
+    "schemaVersion": 38,
+    "version": 1,
+    "links": []
+  },
+  "overwrite": true
+}
