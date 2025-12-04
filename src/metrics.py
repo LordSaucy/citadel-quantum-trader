@@ -108,4 +108,13 @@ def trigger_kill_switch():
     kill_switch_active.set(1)
     # … existing logic that pauses the bot …
 
+orders_per_sec = Gauge(
+    "citadel_orders_per_sec",
+    "Number of orders processed per second (aggregate across all buckets)",
+)
+
+# Increment this gauge in the order‑submission path:
+def record_order():
+    # after a successful order:
+    orders_per_sec.inc()
 
