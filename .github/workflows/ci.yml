@@ -481,3 +481,56 @@ jobs:
           path: |
             backtest_summary_*.json
             backtest_trades_*.csv
+  stress-test:
+    name: 📈 Extreme‑period stress test
+    runs-on: ubuntu-latest
+    needs: [integration-tests]          # run after the normal back‑test job
+    env:
+      # You can change these defaults per‑run via workflow_dispatch inputs
+      LATENCY_SECONDS: 0.2
+      MOCK_LIR: 0.65
+    steps:
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v3
+
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 📂 Ensure stress data is present
+        run: |
+          # The data folder is part of the repo; just sanity‑check
+          ls -l data/stress
+
+      - name: 🚦 Run stress test (GBPUSD Sep‑2022)
+        id: stress
+        run: |
+          python -m src.stress.run_stress \
+            --data data/stress/GBPUSD_20220909.parquet \
+            --symbol GBPUSD \
+            --timeframe 5 \
+            --start 2022-09-09T00:00:00Z \
+            --end   2022-09-09T23:59:59Z \
+            --latency ${{ env.LATENCY_SECONDS }} \
+            --lir ${{ env.MOCK_LIR }}
+
+      - name: 📊 Capture result as artifact (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress‑test‑log
+          path: |
+            backtest_results/validation_*.json   # any files the validator writes
+            src/stress/run_stress.py
+
+      - name: ❗ Fail the pipeline if stress test failed
+        if: steps.stress.outcome != 'success'
+        run: |
+          echo "⚠️ Stress test reported FAILURE – killing the pipeline"
+          exit 1
