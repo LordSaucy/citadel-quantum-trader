@@ -1248,3 +1248,10 @@ rollback-watcher:
       - backend
     restart: unless-stopped
 
+citadel-db:
+  build:
+    context: ./admin_ui/backend   # folder that contains the Dockerfile above
+    dockerfile: Dockerfile
+  # … rest of the service definition stays the same …
+
+
