@@ -2,6 +2,7 @@ from prometheus_client import Gauge
 from prometheus_client import Counter, Gauge
 from src.edge_decay_detector import edge_decay_events_total, 
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Gauge, start_http_server
 
 bucket_winrate = Gauge(
     "bucket_winrate",
@@ -161,3 +162,9 @@ def record_reject(symbol: str, asset_class: str):
 
 def record_slippage(symbol: str, asset_class: str, amount: float):
     SLIPPAGE_GAUGE.labels(symbol=symbol, asset_class=asset_class).set(amount)
+
+
+INGEST_TS = Gauge("cqt_last_ingest_timestamp", "Unix timestamp of the most recent successful data‑ingest")
+def run():
+    # … after successful write …
+    INGEST_TS.set(int(time.time()))
