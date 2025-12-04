@@ -849,3 +849,42 @@ class MultiBrokerRouter:
             return self.secondary.send_order(**params)
         return None
 
+def send_order(self, symbol, volume, side, price=None, sl=None, tp=None):
+    # Build the kwargs dict once so we can reuse it for fallback
+    order_kwargs = dict(
+        symbol=symbol,
+        volume=volume,
+        side=side,
+        price=price,
+        sl=sl,
+        tp=tp,
+        comment="Citadel QT",
+    )
+    # Store the original params for possible fallback later
+    order_id, submit_ts, submit_price = self.broker.send_order(**order_kwargs)
+    # Keep a reference for later fallback (if needed)
+    self.broker._original_params[order_id] = order_kwargs
+    # Record submission info as before (for latency/slippage metrics)
+    self.submissions[order_id] = {
+        "submit_ts": submit_ts,
+        "submit_price": submit_price,
+        "symbol": symbol,
+        "side": side,
+    }
+    return order_id
+
+def on_order_filled(self, order_id, fill_price, fill_timestamp):
+    sub = self.submissions.pop(order_id, None)
+    if not sub:
+        return
+
+    latency = fill_timestamp - sub["submit_ts"]
+    order_latency_seconds.observe(latency)
+
+    # If latency exceeded threshold and we haven't already used the fallback,
+    # retry on secondary broker.
+    if latency > self.broker.latency_threshold and not sub.get("fallback"):
+        # Re‑issue the same order on the secondary broker
+        self.broker.maybe_fallback_based_on_latency(order_id, latency)
+
+    # Continue with slippage calculation as shown in section 1.2…
