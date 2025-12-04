@@ -23,3 +23,11 @@ async def save_config(new_cfg: dict):
     # If you need an explicit HTTP trigger, uncomment:
     # async with aiohttp.ClientSession() as s:
     #     await s.post(f"http://citadel-bot:8000/api/v1/reload-config")
+
+STAGING_PATH = Path("/app/config/config_staging.yaml")
+
+async def propose_config(new_cfg: dict):
+    # Write to staging area (still inside the container, writable)
+    async with aiofiles.open(STAGING_PATH, "w") as f:
+        await f.write(yaml.safe_dump(new_cfg, sort_keys=False))
+    return {"msg": "Config proposal saved – create a PR to promote"}
