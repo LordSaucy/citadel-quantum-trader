@@ -12,6 +12,7 @@ from fitness import fitness
 import numpy as np
 from datetime import datetime
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+import subprocess, json, sys
 
 
 # -----------------------------------------------------------------
@@ -488,3 +489,33 @@ audit_record = {
 Path('../audit').mkdir(parents=True, exist_ok=True)
 (Path('../audit') / f'optimiser_{datetime.utcnow():%Y%m%d_%H%M%S}.json').write_text(json.dumps(audit_record, indent=2))
 
+
+SANDBOX_DATA = os.getenv("SANDBOX_DATA", "/data/sandbox_validation.parquet")
+CURRENT_CFG_PATH = "/opt/config/current_config.yaml"   # the config currently in production
+
+def _run_sandbox(cfg_path):
+    """Execute a full back‑test on a held‑out slice and return key metrics."""
+    cmd = [
+        "python", "backtest_runner.py",
+        "--config", cfg_path,
+        "--data", SANDBOX_DATA,
+        "--output", "/tmp/sandbox_report.json"
+    ]
+    subprocess.check_call(cmd, cwd="/app")   # raise if non‑zero exit
+    with open("/tmp/sandbox_report.json") as f:
+        return json.load(f)
+
+sandbox_res = _run_sandbox("/opt/config/new_config.yaml")
+prev_res   = _run_sandbox(CURRENT_CFG_PATH)
+
+# ---- Acceptance criteria (example) ----
+MIN_EXPECTANCY_IMPROVEMENT = 0.05   # 5 % better than current
+if sandbox_res["expectancy"] < prev_res["expectancy"] * (1 + MIN_EXPECTANCY_IMPROVEMENT):
+    print("❌ Sandbox failed – not enough expectancy gain")
+    sys.exit(1)
+
+if sandbox_res["max_dd"] > 0.20:
+    print("❌ Sandbox failed – draw‑down > 20 %")
+    sys.exit(1)
+
+print("✅ Sandbox passed – moving to paper‑trading")
