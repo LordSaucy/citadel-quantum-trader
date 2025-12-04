@@ -1,0 +1,15 @@
+{
+  "type": "stat",
+  "title": "Current Trend Weights",
+  "targets": [
+    {
+      "expr": "cqt_feature_weight{regime='trend'}",
+      "legendFormat": "{{feature}}"
+    }
+  ],
+  "fieldConfig": {
+    "defaults": {
+      "unit": "none"
+    }
+  }
+}
