@@ -3,6 +3,8 @@ from metrics.prometheus import start_prometheus
 
 from flask import Flask, jsonify
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from market_data.dom_cache import DomCache
+from ibkr_dom import connect_ibkr   # or mt5_dom.connect_mt5()
 
 from news_overlay import is_recent_high_impact
 from prometheus_client import Gauge
@@ -618,3 +620,9 @@ def run_one_symbol(symbol: str):
         if signal:
             broker.place_order(**signal)
         time.sleep(5)   # polling interval – adjust as needed
+
+broker = connect_ibkr()   # ← already reads IBKR_HOST, USER, PASS from env
+
+# Initialise the singleton – it will start the background thread
+dom_cache = DomCache(broker_interface=broker, top_n=20)
+dom_df = DomCache().get("EURUSD")   # returns a DataFrame with price, bid_volume, ask_volume
