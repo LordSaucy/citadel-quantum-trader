@@ -17,3 +17,27 @@ service:
     traces:
       receivers: [otlp]
       exporters: [jaeger, prometheus]
+
+
+processors:
+  filter:
+    error_spans:
+      error_mode: ignore
+      trace_state:
+        - key: "error"
+          value: "true"
+
+
+processors:
+  batch:
+    timeout: 5s
+  memory_limiter:
+    limit_mib: 500
+    spike_limit_mib: 100
+    check_interval: 5s
+  tail_sampling:
+    policies:
+      - name: keep_some_trades
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 5   # keep 5 % of spans
