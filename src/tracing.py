@@ -4,6 +4,17 @@ from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.asyncio import AsyncIOInstrumentor
+from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+
+
+AsyncIOInstrumentor().instrument()
+AioHttpClientInstrumentor().instrument()
+RequestsInstrumentor().instrument()
+Psycopg2Instrumentor().instrument()
+
 
 # Resource identifies this service in Jaeger
 resource = Resource(attributes={
