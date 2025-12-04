@@ -1,0 +1,14 @@
+apiVersion: 1
+groups:
+  - name: "Latency‑Guard"
+    interval: 30s
+    rules:
+      - alert: HighLatencyGuard
+        expr: guard_latency_seconds > 0.15
+        for: 2m
+        annotations:
+          summary: "Latency guard > 150 ms"
+          description: "Network round‑trip latency is exceeding the safe threshold."
+        labels:
+          severity: warning
+          channel: slack
