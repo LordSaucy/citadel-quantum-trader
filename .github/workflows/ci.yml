@@ -534,3 +534,20 @@ jobs:
         run: |
           echo "⚠️ Stress test reported FAILURE – killing the pipeline"
           exit 1
+- name: Walk‑forward back‑test
+  run: |
+    docker run --rm \
+      -v ${{ github.workspace }}/data:/app/data \
+      citadel/trader:${{ steps.build.outputs.tag }} \
+      python -m src.walkforward.run_walkforward \
+        --data /app/data/EURUSD_5min_2022-2024.csv \
+        --train-days 60 \
+        --test-days 30 \
+        --step-days 10 \
+        --out /app/walkforward_results.csv
+  # Upload the CSV as a CI artifact
+- name: Upload walk‑forward results
+  uses: actions/upload-artifact@v4
+  with:
+    name: walkforward-results
+    path: walkforward_results.csv
