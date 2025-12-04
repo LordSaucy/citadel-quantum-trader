@@ -247,3 +247,56 @@ groups:
   # 2. Error‑budget consumption (percentage of allowed errors used)
   - record: slo:latency_error_budget_consumed
     expr: (sum(slo:latency_error[1h]) / (3600 * 0.05)) * 100
+
+Utility wrappers around the Prometheus HTTP API.
+All functions return a **float** (or 0.0 if the metric is missing).
+"""
+
+import httpx
+from typing import Optional
+
+PROMETHEUS_ENDPOINT = "http://prometheus:9090/api/v1/query"
+
+def _query(expr: str) -> Optional[float]:
+    """Internal helper – returns the first sample value or None."""
+    try:
+        r = httpx.get(PROMETHEUS_ENDPOINT, params={"query": expr}, timeout=5)
+        r.raise_for_status()
+        payload = r.json()
+        if payload["status"] != "success":
+            return None
+        results = payload["data"]["result"]
+        if not results:
+            return None
+        # result[0]["value"] = [timestamp, "<value_as_string>"]
+        return float(results[0]["value"][1])
+    except Exception:
+        return None
+
+
+def get_latency() -> float:
+    """Maximum observed order‑submission latency (seconds)."""
+    return _query("max(cqt_latency_seconds)") or 0.0
+
+
+def get_reject_rate() -> float:
+    """
+    Reject rate per second, averaged over the last 5 minutes.
+    Multiply by 3600 to get per‑hour, or by 100 for a percent.
+    """
+    return _query("rate(cqt_reject_total[5m])") or 0.0
+
+
+def get_average_slippage() -> float:
+    """Mean slippage across all filled orders (pips)."""
+    return _query("avg(cqt_slippage_pips)") or 0.0
+
+
+def get_drawdown() -> float:
+    """Current draw‑down percentage (negative number)."""
+    return _query("max(drawdown_pct)") or 0.0
+
+
+def get_win_rate() -> float:
+    """Overall win‑rate (fraction, 0‑1)."""
+    return _query("sum(order_success_total) / sum(order_total)") or 0.0 
