@@ -174,6 +174,20 @@ services:
     depends_on:
       - prometheus
 
+      services:
+  grafana:
+    image: grafana/grafana:10.2.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana:/etc/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASS}
+      - OKTA_CLIENT_ID=${OKTA_CLIENT_ID}
+      - OKTA_CLIENT_SECRET=${OKTA_CLIENT_SECRET}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+    restart: unless-stopped
+
 # ----------------------------------------------------------------------
 #  7️⃣  GRAFANA (public – read‑only, anonymous access)
 # ----------------------------------------------------------------------
@@ -191,16 +205,7 @@ services:
     networks:
       - cqt-net
 
-      services:
-  grafana:
-    image: grafana/grafana:10.2.0
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./grafana:/etc/grafana
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASS}
-    restart: unless-stopped
+    
 
 # ----------------------------------------------------------------------
 #  8️⃣  NGINX REVERSE‑PROXY (TLS termination for public endpoints)
