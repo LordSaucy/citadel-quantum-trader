@@ -3,6 +3,8 @@
 # ------------------------------------------------------------
 FROM python:3.12-slim AS builder
 
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
+
 # ---- OS‑level build dependencies (gcc, libpq‑dev, etc.) ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
