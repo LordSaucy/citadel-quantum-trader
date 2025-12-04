@@ -1,0 +1,14 @@
+apiVersion: 1
+groups:
+  - name: "Depth‑Guard"
+    interval: 30s
+    rules:
+      - alert: LowMarketDepth
+        expr: cqt_total_market_depth{bucket_id="B1",symbol="EURUSD"} < 15000
+        for: 2m
+        annotations:
+          summary: "Total depth fell below 15 k units"
+          description: "Order‑book is too thin – depth guard may start rejecting trades."
+        labels:
+          severity: warning
+          channel: slack
