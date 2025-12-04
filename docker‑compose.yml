@@ -108,13 +108,17 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: cqt-prometheus
-    restart: unless-stopped
+
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
       - prom_data:/prometheus
+      command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
     networks:
       - cqt-net
     depends_on:
@@ -125,6 +129,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+        restart: unless-stopped
 
 # ----------------------------------------------------------------------
 #  4️⃣  ALERTMANAGER (receives alerts from Prometheus)
@@ -288,12 +293,13 @@ services:
   loki:
     image: grafana/loki:2.9.5
     container_name: cqt-loki
-    restart: unless-stopped
+
     ports:
       - "3100:3100"
+      command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
-      - loki_data:/loki
+ restart: unless-stopped
     networks:
       - cqt-net
 
