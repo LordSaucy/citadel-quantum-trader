@@ -331,3 +331,8 @@ brokers:
     api_url: https://api.tradovate.com/v1
     access_token: "<PLACEHOLDER>"
 
+multi_broker:
+  primary: "mt5"
+  secondary: "ibkr"
+  latency_threshold_seconds: 0.20   # 200 ms
+  fallback_enabled: true
