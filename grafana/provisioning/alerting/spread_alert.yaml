@@ -1,0 +1,15 @@
+# grafana/provisioning/alerting/spread_alert.yaml
+apiVersion: 1
+groups:
+  - name: "Spread‑Guard"
+    interval: 30s
+    rules:
+      - alert: WideSpreadGuard
+        expr: guard_spread_pips > 0.5
+        for: 2m
+        annotations:
+          summary: "Spread > 0.5 pips"
+          description: "The market spread has widened beyond the safe limit – trades are being skipped."
+        labels:
+          severity: warning
+          channel: slack
