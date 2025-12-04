@@ -299,3 +299,12 @@ groups:
           summary: "Live expectancy dropped >10 % vs. last optimiser"
           description: "Investigate immediately – automatic rollback will be triggered."
 
+- alert: LatencySLOBurnRate
+  expr: (slo:latency_99th > 0.15) and (slo:latency_99th offset 1h > 0.15)
+  for: 5m
+  labels:
+    severity: critical
+  annotations:
+    summary: "Latency SLO burn‑rate > 1h"
+    description: "The 99th‑percentile latency has been > 150 ms for the past hour."
+
