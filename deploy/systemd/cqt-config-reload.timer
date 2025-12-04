@@ -1,0 +1,11 @@
+# /etc/systemd/system/cqt-config-reload.timer
+[Unit]
+Description=Run CQT Config Reload daily at 02:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
