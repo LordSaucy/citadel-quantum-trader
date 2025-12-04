@@ -1,3 +1,6 @@
+pandas==2.2.*
+ta-lib==0.4.24   # wrapper around the C library; you may need libta-lib-dev in the Dockerfile
+
 fastapi==0.110.*
 uvicorn[standard]==0.27.*
 python-jose[cryptography]==3.3.*
