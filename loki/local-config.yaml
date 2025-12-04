@@ -82,3 +82,8 @@ table_manager:
   retention_deletes_enabled: true
   retention_period: 30d
 
+compactor:
+  retention_enabled: true
+  retention_delete_delay: 48h
+  retention_delete_worker_interval: 1h
+  retention_delete_retention_period: 30d
