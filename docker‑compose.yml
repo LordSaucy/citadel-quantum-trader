@@ -1230,3 +1230,5 @@ citadel-bot:
   environment:
     - LUMO_ENV=demo   # forces the bot to use the demo broker endpoints
 
+environment:
+  - BROKER_MODE=demo          # your bot should read this and pick the right secret
