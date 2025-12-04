@@ -38,7 +38,72 @@ from src.execution.broker_router import get_broker
 from src.backtest.validator import BacktestValidator
 from src.risk.volatility_scaler import scale_risk
 from src.risk.session_manager import allowed_now
+# src/main.py
+import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+# Import all routers
+from .api.health   import router as health_router
+from .api.config   import router as config_router
+from .api.risk     import router as risk_router
+from .api.bot      import router as bot_router
+from .api.orders   import router as orders_router
+from .api.trades   import router as trades_router
+from .api.backup   import router as backup_router
+from .api.mode     import router as mode_router
+from .api.session  import router as session_router
+from .api.admin    import router as admin_router
+
+app = FastAPI(
+    title="Citadel Quantum Trader (CQT) Control API",
+    version=os.getenv("CQT_VERSION", "dev"),
+    description="""
+A **single‑purpose, internal‑only** control plane for the Citadel Quantum Trader.
+All endpoints are protected by a bearer‑token (see `Authorization: Bearer <token>`).
+
+The API is meant to be fronted by the **DigitalOcean Managed Load Balancer**
+(which performs health‑checks on `/healthz`) and consumed by internal
+automation scripts, Grafana Text panels, or CI/CD pipelines.
+""",
+)
+
+# -----------------------------------------------------------------
+# CORS – allow the Grafana UI (running on a different origin) to
+# call the API directly from the browser.
+# -----------------------------------------------------------------
+origins = [
+    "https://grafana.cqt.example.com",
+    "http://localhost:3000",   # local dev
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["*"],
+)
+
+# -----------------------------------------------------------------
+# Register routers (order matters does not matter here)
+# -----------------------------------------------------------------
+app.include_router(health_router)
+app.include_router(config_router)
+app.include_router(risk_router)
+app.include_router(bot_router)
+app.include_router(orders_router)
+app.include_router(trades_router)
+app.include_router(backup_router)
+app.include_router(mode_router)
+app.include_router(session_router)
+app.include_router(admin_router)
+
+# -----------------------------------------------------------------
+# Root endpoint – simple welcome message
+# -----------------------------------------------------------------
+@app.get("/", include_in_schema=False)
+async def root():
+    return {"message": "CQT Control API – use /docs for the OpenAPI UI"}
 
 start_prometheus(port=9090)   # expose on 0.0.0.0:9090 (already mapped in docker‑compose)
 
