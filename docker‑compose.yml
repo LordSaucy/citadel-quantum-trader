@@ -1153,3 +1153,15 @@ citadel-bot:
   # …
 volumes:
   bot_state:
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend
+    restart: unless-stopped
+volumes:
+  redis-data:
+
