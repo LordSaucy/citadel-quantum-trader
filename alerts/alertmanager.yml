@@ -326,3 +326,16 @@ route:
     - match:
         severity: "critical"
       receiver: pagerduty
+
+      - alert: LatencySLOBurnRate
+  expr: slo:latency_error_budget_consumed > 80
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Latency error budget > 80 % consumed"
+    description: |
+      The 99th‑percentile latency has been above 150 ms enough to use
+      80 % of the allowed error budget in the last hour.
+      Investigate the depth guard, network latency, or broker API health.
+
