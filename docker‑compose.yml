@@ -1236,3 +1236,15 @@ environment:
   environment:
   - SHADOW_MODE=${SHADOW_MODE:-false}
 
+rollback-watcher:
+    build:
+      context: ./watcher
+      dockerfile: Dockerfile
+    volumes:
+      - ./shared/config:/opt/config
+    depends_on:
+      - prometheus
+    networks:
+      - backend
+    restart: unless-stopped
+
