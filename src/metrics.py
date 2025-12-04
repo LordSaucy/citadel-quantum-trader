@@ -168,3 +168,15 @@ INGEST_TS = Gauge("cqt_last_ingest_timestamp", "Unix timestamp of the most recen
 def run():
     # … after successful write …
     INGEST_TS.set(int(time.time()))
+
+depth_guard_rejections = Counter(
+    "cqt_depth_guard_rejections_total",
+    "Number of trades rejected by the depth‑guard",
+    ["bucket_id", "symbol"]
+)
+
+# Inside depth_guard(...)
+if not enough_volume:
+    depth_guard_rejections.labels(bucket_id=str(bucket_id), symbol=symbol).inc()
+    return False
+
