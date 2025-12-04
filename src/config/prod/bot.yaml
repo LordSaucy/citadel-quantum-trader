@@ -1,0 +1,31 @@
+# config/prod/bot.yaml
+global:
+  risk_budget_pct: 1.0          # baseline % of equity per trade
+  reserve_pool_pct: 20
+  kill_switch_dd_threshold: 5   # % draw‑down
+
+assets:
+  forex:
+    risk_multiplier: 1.0
+    session: "LONDON_NY_OVERLAP"
+    max_slippage_pips: 2
+  metal:
+    risk_multiplier: 0.9
+    session: "NY_SESSION"
+    max_slippage_pips: 0.5
+  index:
+    risk_multiplier: 0.6
+    session: "US_SESSION"
+    max_slippage_points: 1
+  stock:
+    risk_multiplier: 1.2
+    session: "US_SESSION"
+    max_slippage_dollars: 0.05
+  future:
+    risk_multiplier: 0.8
+    session: "US_SESSION"
+    max_slippage_points: 0.5
+  crypto:
+    risk_multiplier: 3.0
+    session: "ALL_DAY"
+    max_slippage_usd: 0.01
