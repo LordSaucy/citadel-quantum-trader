@@ -1,0 +1,250 @@
+{
+  "dashboard": {
+    "uid": "citadel-root-cause",
+    "title": "Citadel – Root‑Cause Explorer",
+    "tags": ["cqt","root‑cause"],
+    "timezone": "browser",
+    "editable": true,
+    "panels": [
+      {
+        "type": "stat",
+        "title": "Current Latency (seconds)",
+        "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "cqt_order_latency_seconds",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "seconds",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" },
+                { "value": 0.10, "color": "orange" },
+                { "value": 0.15, "color": "red" }
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto",
+          "textMode": "auto"
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Current Spread (pips)",
+        "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "B",
+            "expr": "cqt_spread_pips",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" },
+                { "value": 0.5, "color": "orange" },
+                { "value": 1.0, "color": "red" }
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto",
+          "textMode": "auto"
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Current LIR",
+        "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "C",
+            "expr": "cqt_liquidity_imbalance_ratio",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": -1,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": -0.8, "color": "red" },
+                { "value": -0.3, "color": "orange" },
+                { "value": 0.3, "color": "green" },
+                { "value": 0.8, "color": "orange" },
+                { "value": 1, "color": "red" }
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto",
+          "textMode": "auto"
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Kill‑Switch Status",
+        "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "D",
+            "expr": "cqt_kill_switch_active",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "green", "label": "OFF" },
+                { "value": 1, "color": "red", "label": "ON" }
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "textMode": "value"
+        }
+      },
+      {
+        "type": "graph",
+        "title": "LIR History (per bucket)",
+        "gridPos": { "x": 0, "y": 4, "w": 12, "h": 10 },
+        "targets": [
+          {
+            "refId": "E",
+            "expr": "cqt_liquidity_imbalance_ratio",
+            "legendFormat": "Bucket {{bucket_id}}",
+            "interval": ""
+          }
+        ],
+        "lines": true,
+        "linewidth": 2,
+        "fill": 1,
+        "yaxes": [
+          { "format": "percent", "label": "LIR", "logBase": 1, "min": -1, "max": 1 },
+          { "show": false }
+        ],
+        "tooltip": { "shared": true, "sort": 0 }
+      },
+      {
+        "type": "graph",
+        "title": "Latency Histogram (95th‑pct)",
+        "gridPos": { "x": 12, "y": 4, "w": 12, "h": 10 },
+        "targets": [
+          {
+            "refId": "F",
+            "expr": "histogram_quantile(0.95, sum(rate(cqt_order_latency_seconds_bucket[5m])) by (le))",
+            "legendFormat": "≤ {{le}} s",
+            "interval": ""
+          }
+        ],
+        "bars": true,
+        "fill": 1,
+        "linewidth": 1,
+        "yaxes": [
+          { "format": "seconds", "label": "Latency", "logBase": 1 },
+          { "show": false }
+        ],
+        "tooltip": { "shared": true, "sort": 0 }
+      },
+      {
+        "type": "table",
+        "title": "Recent Trade‑Rejection Log (last 30 min)",
+        "gridPos": { "x": 0, "y": 14, "w": 24, "h": 8 },
+        "targets": [
+          {
+            "refId": "G",
+            "expr": "cqt_trade_rejection_total",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "transformations": [
+          {
+            "id": "filterFieldsByName",
+            "options": { "include": ["time", "reject_code", "bucket_id", "symbol"] }
+          },
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": [],
+              "indexByName": {},
+              "renameByName": {}
+            }
+          }
+        ],
+        "options": {
+          "showHeader": true,
+          "fontSize": "100%"
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "bucket_id",
+          "type": "query",
+          "datasource": "Prometheus",
+          "definition": "label_values(cqt_liquidity_imbalance_ratio, bucket_id)",
+          "includeAll": true,
+          "multi": true,
+          "refresh": 1,
+          "sort": 1,
+          "hide": 0
+        },
+        {
+          "name": "symbol",
+          "type": "query",
+          "datasource": "Prometheus",
+          "definition": "label_values(cqt_liquidity_imbalance_ratio, symbol)",
+          "includeAll": true,
+          "multi": true,
+          "refresh": 1,
+          "sort": 1,
+          "hide": 0
+        }
+      ]
+    },
+    "refresh": "30s",
+    "schemaVersion": 38,
+    "version": 1,
+    "links": []
+  },
+  "overwrite": true
+}
