@@ -1,0 +1,194 @@
+{
+  "dashboard": {
+    "uid": "cqt-optimiser-health",
+    "title": "CQT – Optimiser Health",
+    "tags": ["cqt","optimiser"],
+    "timezone": "browser",
+    "editable": true,
+    "panels": [
+      {
+        "type": "stat",
+        "title": "Latest Fitness",
+        "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "cqt_opt_best_fitness",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "none",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" },
+                { "value": 0.8, "color": "orange" },
+                { "value": 0.6, "color": "red" }
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto",
+          "textMode": "auto"
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Run Duration (seconds)",
+        "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "B",
+            "expr": "cqt_opt_last_duration_seconds",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "seconds",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 300, "color": "green" },
+                { "value": 600, "color": "orange" },
+                { "value": 900, "color": "red" }
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto",
+          "textMode": "auto"
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Total Optimiser Runs",
+        "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "C",
+            "expr": "cqt_opt_runs_total",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto",
+          "textMode": "auto"
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Live‑Expectancy Gap",
+        "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "D",
+            "expr": "cqt_opt_last_fitness - cqt_live_expectancy",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "none",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": -0.05, "color": "red" },
+                { "value": 0, "color": "orange" },
+                { "value": 0.05, "color": "green" }
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto",
+          "textMode": "auto"
+        }
+      },
+      {
+        "type": "graph",
+        "title": "Fitness Trend (30‑day)",
+        "gridPos": { "x": 0, "y": 4, "w": 12, "h": 10 },
+        "targets": [
+          {
+            "refId": "E",
+            "expr": "increase(cqt_opt_last_fitness[30d])",
+            "legendFormat": "Fitness Δ",
+            "interval": ""
+          }
+        ],
+        "lines": true,
+        "linewidth": 2,
+        "fill": 1,
+        "yaxes": [
+          { "format": "none", "label": "Δ fitness", "logBase": 1 },
+          { "show": false }
+        ],
+        "tooltip": { "shared": true, "sort": 0 }
+      },
+      {
+        "type": "stat",
+        "title": "Alert Status – Production Expectancy Drop",
+        "gridPos": { "x": 12, "y": 4, "w": 12, "h": 4 },
+        "targets": [
+          {
+            "refId": "F",
+            "expr": "ALERTS{alertname=\"ProductionExpectancyDrop\"}",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "green", "label": "OK" },
+                { "value": 1, "color": "red", "label": "Firing" }
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "textMode": "value"
+        }
+      }
+    ],
+    "templating": { "list": [] },
+    "refresh": "30s",
+    "schemaVersion": 38,
+    "version": 1,
+    "links": []
+  },
+  "overwrite": true
+}
