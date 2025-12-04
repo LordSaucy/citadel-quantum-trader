@@ -1,0 +1,15 @@
+# grafana/provisioning/alerting/volatility_alert.yaml
+apiVersion: 1
+groups:
+  - name: "Volatility‑Guard"
+    interval: 30s
+    rules:
+      - alert: VolatilitySpikeGuard
+        expr: guard_atr > 2.0   # 2 % ATR threshold (adjust to your risk appetite)
+        for: 2m
+        annotations:
+          summary: "ATR > 2 %"
+          description: "Recent volatility spike exceeds the configured guard – trades may be blocked."
+        labels:
+          severity: warning
+          channel: slack
