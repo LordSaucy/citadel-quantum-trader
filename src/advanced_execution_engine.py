@@ -805,3 +805,47 @@ class AdvancedExecutionEngine:
         if not self.broker.connect():
             raise RuntimeError("Failed to connect to broker")
 
+class MultiBrokerRouter:
+    def __init__(self, primary: BrokerInterface, secondary: BrokerInterface,
+                 latency_threshold: float = 0.20):
+        self.primary = primary
+        self.secondary = secondary
+        self.latency_threshold = latency_threshold  # seconds
+
+    def send_order(self, **kwargs):
+        # 1️⃣ Submit to primary and record timestamp
+        start_ts = time.time()
+        try:
+            result = self.primary.send_order(**kwargs)
+            # The primary will later call back with fill info.
+            # We store the start_ts so the fill callback can compute latency.
+            result["submit_ts"] = start_ts
+            return result
+        except Exception as exc:
+            # Primary failed outright (e.g., network error)
+            logger.warning(f"Primary broker error: {exc}; falling back")
+            return self._fallback(**kwargs, start_ts=start_ts)
+
+    def _fallback(self, **kwargs, start_ts):
+        # 2️⃣ Try secondary
+        try:
+            result = self.secondary.send_order(**kwargs)
+            result["submit_ts"] = start_ts
+            result["fallback"] = True
+            return result
+        except Exception as exc2:
+            logger.error(f"Both brokers failed: {exc2}")
+            raise  # propagate up – the bot will treat it as a hard failure
+
+    # Optional: a helper that can be called from the fill‑callback
+    # to decide *after* the fact whether latency was too high.
+    def maybe_fallback_based_on_latency(self, order_id, latency):
+        if latency > self.latency_threshold:
+            logger.info(f"Latency {latency:.3f}s > {self.latency_threshold}s – "
+                        f"retrying order {order_id} on secondary")
+            # Re‑issue the same order on secondary (you need to keep the original
+            # order parameters somewhere – e.g., in a dict keyed by order_id)
+            params = self._original_params[order_id]
+            return self.secondary.send_order(**params)
+        return None
+
