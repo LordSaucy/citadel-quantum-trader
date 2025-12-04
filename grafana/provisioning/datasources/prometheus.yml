@@ -1,4 +1,4 @@
-# grafana-provisioning/datasources/prometheus.yml
+# grafana/provisioning/datasources/prometheus.yml
 apiVersion: 1
 
 datasources:
