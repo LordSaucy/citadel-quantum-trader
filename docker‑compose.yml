@@ -1218,3 +1218,12 @@ citadel-bot:
     - citadel_config
   volumes:
     - /run/secrets/citadel_config:/app/config/config.yaml:ro
+
+
+    services:
+  citadel-bot:
+    image: citadel/trader:${BOT_IMAGE_TAG:-latest}
+    ...
+
+
+
