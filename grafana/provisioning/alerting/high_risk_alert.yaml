@@ -1,0 +1,15 @@
+# grafana/provisioning/alerting/high_risk_alert.yaml
+apiVersion: 1
+groups:
+  - name: "Risk‑Fraction"
+    interval: 30s
+    rules:
+      - alert: HighRiskFraction
+        expr: cqt_risk_fraction_used > 0.85   # 85 % of allocated risk used
+        for: 5m
+        annotations:
+          summary: "Risk fraction > 85 %"
+          description: "Approaching the daily risk limit – consider pausing new trades."
+        labels:
+          severity: warning
+          channel: slack
