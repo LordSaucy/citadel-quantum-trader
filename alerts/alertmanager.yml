@@ -308,3 +308,21 @@ groups:
     summary: "Latency SLO burn‑rate > 1h"
     description: "The 99th‑percentile latency has been > 150 ms for the past hour."
 
+receivers:
+  - name: slack-primary
+    slack_configs:
+      - api_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
+        channel: "#citadel-alerts"
+        send_resolved: true
+
+  - name: pagerduty
+    pagerduty_configs:
+      - service_key: <PD_INTEGRATION_KEY>
+        severity: "{{ .CommonLabels.severity }}"
+
+route:
+  receiver: slack-primary
+  routes:
+    - match:
+        severity: "critical"
+      receiver: pagerduty
