@@ -1333,3 +1333,14 @@ tempo:
     - "4318:4318"   # OTLP ingest (http)
 
 
+citadel-bot:
+  image: citadel/trader:latest
+  # …
+  labels:
+    - "citadel=true"
+
+bot-control:
+  # …
+  labels:
+    - "citadel=true"
+
