@@ -93,3 +93,40 @@
   "title": "Arb Successes",
   "type": "stat"
 }
+
+{
+  "type": "stat",
+  "title": "Global Win‑Rate",
+  "targets": [
+    {
+      "expr": "sum(order_success_total) / sum(order_total)",
+      "legendFormat": "All assets"
+    }
+  ],
+  "colorMode": "value",
+  "thresholds": "0.99,0.995"
+},
+{
+  "type": "stat",
+  "title": "Max Draw‑Down (any asset)",
+  "targets": [
+    {
+      "expr": "max(drawdown_pct)",
+      "legendFormat": ""
+    }
+  ],
+  "colorMode": "value",
+  "thresholds": "-3,-2"
+},
+{
+  "type": "stat",
+  "title": "Latency (95th pct)",
+  "targets": [
+    {
+      "expr": "histogram_quantile(0.95, sum(rate(cqt_latency_seconds_bucket[5m])) by (le))",
+      "legendFormat": ""
+    }
+  ],
+  "colorMode": "value",
+  "thresholds": "0.1,0.2"
+}
