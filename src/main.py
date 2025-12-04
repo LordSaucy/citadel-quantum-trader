@@ -42,6 +42,8 @@ from src.risk.session_manager import allowed_now
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry.instrumentation.asyncio import AsyncIOInstrumentor
+
 
 # Import all routers
 from .api.health   import router as health_router
@@ -97,6 +99,9 @@ app.include_router(backup_router)
 app.include_router(mode_router)
 app.include_router(session_router)
 app.include_router(admin_router)
+
+AsyncIOInstrumentor().instrument()
+
 
 # -----------------------------------------------------------------
 # Root endpoint – simple welcome message
