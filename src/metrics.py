@@ -3,6 +3,8 @@ from prometheus_client import Counter, Gauge
 from src.edge_decay_detector import edge_decay_events_total, 
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from prometheus_client import Gauge, start_http_server
+import os
+
 
 bucket_winrate = Gauge(
     "bucket_winrate",
@@ -193,3 +195,43 @@ for _, row in dom_df.iterrows():
         side="bid" if row['bid_volume'] > 0 else "ask"
     ).set(row['bid_volume'] if row['bid_volume'] > 0 else row['ask_volume'])
  
+# -----------------------------------------------------------------
+# Existing metrics (orders, latency, etc.) – keep them as‑is.
+# -----------------------------------------------------------------
+order_total = Counter(
+    "cqt_orders_total",
+    "Total number of orders attempted",
+    ["bucket_id", "success"]
+)
+
+order_latency = Gauge(
+    "cqt_order_latency_seconds",
+    "Latency from signal generation to order submission",
+    ["bucket_id"]
+)
+
+# -----------------------------------------------------------------
+# NEW metrics for liquidity
+# -----------------------------------------------------------------
+lir_gauge = Gauge(
+    "cqt_liquidity_imbalance_ratio",
+    "Liquidity Imbalance Ratio (LIR) per bucket and symbol",
+    ["bucket_id", "symbol"]
+)
+
+depth_gauge = Gauge(
+    "cqt_total_market_depth",
+    "Sum of bid + ask volume for the top N levels (units of contract)",
+    ["bucket_id", "symbol"]
+)
+
+# -----------------------------------------------------------------
+# Helper to start the HTTP endpoint (called once at process start)
+# -----------------------------------------------------------------
+def start_prometheus(port: int = 9090):
+    """
+    Starts the Prometheus metrics endpoint in a background thread.
+    Call this early in your main() before any metrics are emitted.
+    """
+    start_http_server(port)
+    # No blocking – the server runs in its own thread.
