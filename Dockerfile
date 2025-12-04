@@ -198,3 +198,8 @@ RUN pip install --no-cache-dir \
     ninjatrader-sdk \
     tradovate-api
 
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install prometheus-api-client requests
+COPY rollback_watcher.py .
+CMD ["python", "rollback_watcher.py"]
