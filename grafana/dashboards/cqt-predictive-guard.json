@@ -1,0 +1,195 @@
+{
+  "dashboard": {
+    "uid": "cqt-predictive-guard",
+    "title": "Predictive Guard – Skip Counters & Live Guard Values",
+    "tags": ["cqt","guard"],
+    "timezone": "browser",
+    "editable": true,
+    "panels": [
+      {
+        "type": "stat",
+        "title": "Depth Guard Skips",
+        "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum(trade_skipped_total{reason=\"depth\"})",
+            "legendFormat": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": { "mode": "absolute", "steps": [{ "value": null, "color": "green" }] }
+          }
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Latency Guard Skips",
+        "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "B",
+            "expr": "sum(trade_skipped_total{reason=\"latency\"})",
+            "legendFormat": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Spread Guard Skips",
+        "gridPos": { "x": 0, "y": 4, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "C",
+            "expr": "sum(trade_skipped_total{reason=\"spread\"})",
+            "legendFormat": ""
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "short" } }
+      },
+      {
+        "type": "stat",
+        "title": "Volatility‑Spike Guard Skips",
+        "gridPos": { "x": 6, "y": 4, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "D",
+            "expr": "sum(trade_skipped_total{reason=\"volatility\"})",
+            "legendFormat": ""
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "short" } }
+      },
+      {
+        "type": "stat",
+        "title": "Current Latency (seconds)",
+        "gridPos": { "x": 0, "y": 8, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "E",
+            "expr": "guard_latency_seconds",
+            "legendFormat": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "seconds",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" },
+                { "value": 0.15, "color": "orange" },
+                { "value": 0.30, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Current Spread (pips)",
+        "gridPos": { "x": 6, "y": 8, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "F",
+            "expr": "guard_spread_pips",
+            "legendFormat": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" },
+                { "value": 0.5, "color": "orange" },
+                { "value": 1.0, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Current LIR",
+        "gridPos": { "x": 0, "y": 12, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "G",
+            "expr": "guard_liquidity_imbalance_ratio",
+            "legendFormat": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": -0.35, "color": "red" },
+                { "value": -0.20, "color": "orange" },
+                { "value": 0.20,  "color": "green" },
+                { "value": 0.35,  "color": "orange" },
+                { "value": 0.50,  "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Current ATR (%)",
+        "gridPos": { "x": 6, "y": 12, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "H",
+            "expr": "guard_atr",
+            "legendFormat": ""
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0.5,  "color": "green" },
+                { "value": 1.0,  "color": "orange" },
+                { "value": 2.0,  "color": "red" }
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "bucket_id",
+          "type": "query",
+          "datasource": "Prometheus",
+          "definition": "label_values(guard_latency_seconds, bucket_id)",
+          "includeAll": true,
+          "multi": true,
+          "refresh": 1,
+          "sort": 1,
+          "hide": 0
+        }
+      ]
+    },
+    "time": { "from": "now-6h", "to": "now" },
+    "refresh": "30s",
+    "schemaVersion": 38,
+    "version": 1,
+    "links": []
+  },
+  "overwrite": true
+}
