@@ -1232,3 +1232,7 @@ citadel-bot:
 
 environment:
   - BROKER_MODE=demo          # your bot should read this and pick the right secret
+
+  environment:
+  - SHADOW_MODE=${SHADOW_MODE:-false}
+
