@@ -1,0 +1,134 @@
+{
+  "dashboard": {
+    "uid": "cqt-performance",
+    "title": "CQT – Performance & Risk",
+    "tags": ["cqt","performance"],
+    "timezone": "browser",
+    "editable": true,
+    "panels": [
+      {
+        "type": "graph",
+        "title": "Order Latency (seconds)",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "cqt_order_latency_seconds",
+            "legendFormat": "{{bucket_id}}",
+            "interval": ""
+          }
+        ],
+        "yaxes": [
+          { "format": "seconds", "label": "Latency", "logBase": 1, "min": 0 },
+          { "format": "short", "show": false }
+        ],
+        "lines": true,
+        "fill": 1,
+        "linewidth": 2
+      },
+      {
+        "type": "stat",
+        "title": "Current Equity (USD)",
+        "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "B",
+            "expr": "cqt_system_metrics{metric=\"equity\"}",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "format": "currencyUSD",
+        "colorMode": "value",
+        "graphMode": "none",
+        "options": {
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          }
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Draw‑down % (peak‑to‑trough)",
+        "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "refId": "C",
+            "expr": "cqt_system_metrics{metric=\"drawdown_pct\"}",
+            "legendFormat": "",
+            "interval": ""
+          }
+        ],
+        "format": "percent",
+        "colorMode": "value",
+        "graphMode": "none",
+        "options": {
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          }
+        }
+      },
+      {
+        "type": "graph",
+        "title": "Win‑Rate per Bucket",
+        "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "refId": "D",
+            "expr": "cqt_daily_performance{metric=\"win_rate\"}",
+            "legendFormat": "{{bucket_id}}",
+            "interval": ""
+          }
+        ],
+        "yaxes": [
+          { "format": "percent", "label": "Win‑Rate", "min": 0, "max": 1 },
+          { "format": "short", "show": false }
+        ],
+        "lines": true,
+        "fill": 1
+      },
+      {
+        "type": "graph",
+        "title": "Sharpe Ratio (rolling 30‑day)",
+        "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "refId": "E",
+            "expr": "cqt_daily_performance{metric=\"sharpe_ratio\"}",
+            "legendFormat": "{{bucket_id}}",
+            "interval": ""
+          }
+        ],
+        "yaxes": [
+          { "format": "short", "label": "Sharpe", "min": 0 },
+          { "format": "short", "show": false }
+        ],
+        "lines": true,
+        "fill": 1
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "bucket_id",
+          "type": "query",
+          "datasource": "Prometheus",
+          "definition": "label_values(cqt_system_metrics, bucket_id)",
+          "includeAll": true,
+          "multi": true,
+          "refresh": 1,
+          "sort": 1,
+          "hide": 0
+        }
+      ]
+    },
+    "time": { "from": "now-7d", "to": "now" },
+    "refresh": "30s",
+    "schemaVersion": 38,
+    "version": 1,
+    "links": []
+  },
+  "overwrite": true
+}
