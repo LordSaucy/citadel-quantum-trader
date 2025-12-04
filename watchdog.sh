@@ -53,4 +53,21 @@ while true; do
   if (( ok < 3 )); then
     ((
 
+ROLLBACK() {
+  echo "🔄 Initiating automatic rollback..."
+
+  # Read the previously known good tag
+  PREV_TAG=$(cat /opt/citadel/state/last_good_tag.txt || echo "latest")
+  echo "🔁 Switching to previous tag: $PREV_TAG"
+
+  # Update the compose file on‑the‑fly (sed is safe because we only replace the tag)
+  sed -i "s/$$image: citadel\/trader:$$.*/\1$PREV_TAG/" /opt/citadel/docker-compose.yml
+
+  # Redeploy the bot container only
+  docker compose up -d citadel-bot
+
+  # Record the rollback as the new “last good” version
+  echo "$PREV_TAG" > /opt/citadel/state/last_good_tag.txt
+}
+
 
