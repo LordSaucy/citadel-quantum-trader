@@ -1,0 +1,39 @@
+[Unit]
+Description=Citadel Quantum Trader – Daily/Weekly Audit‑Ready Report
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Run the reporter container with the same AWS credentials the bot uses.
+# We mount the host config directory so the script can read config.yaml.
+# The container writes the PDF to /tmp (inside the container) which we
+# bind‑mount to /var/lib/citadel/report on the host – the service
+# then moves the file to the final destination (or just leaves it there).
+
+# ---- Docker run command -------------------------------------------------
+ExecStart=/usr/bin/docker run --rm \
+    --name citadel-report \
+    -e CITADEL_REPORT_S3_BUCKET=${CITADEL_REPORT_S3_BUCKET} \
+    -e CITADEL_REPORT_S3_PREFIX=${CITADEL_REPORT_S3_PREFIX} \
+    -e CITADEL_SMTP_SERVER=${CITADEL_SMTP_SERVER} \
+    -e CITADEL_SMTP_PORT=${CITADEL_SMTP_PORT} \
+    -e CITADEL_SMTP_USER=${CITADEL_SMTP_USER} \
+    -e CITADEL_SMTP_PASSWORD=${CITADEL_SMTP_PASSWORD} \
+    -e CITADEL_REPORT_EMAILS=${CITADEL_REPORT_EMAILS} \
+    -e CITADEL_SLACK_WEBHOOK=${CITADEL_SLACK_WEBHOOK} \
+    -e CITADEL_REPORT_FREQ=${CITADEL_REPORT_FREQ} \
+    -v /opt/citadel/config:/opt/citadel/config:ro \
+    -v /var/lib/citadel/report:/tmp/report \
+    citadel/report:latest \
+    python /app/generate_report.py
+
+# ---- Restart policy ----------------------------------------------------
+Restart=on-failure
+RestartSec=30
+
+# ---- Logging -----------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
