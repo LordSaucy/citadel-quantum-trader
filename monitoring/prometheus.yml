@@ -100,3 +100,15 @@ rule_files:
 #   - url: "http://cortex:9009/api/v1/push"
 # remote_read:
 #   - url: "http://cortex:9009/api/v1/read"
+
+groups:
+- name: citadel_slos
+  interval: 30s
+  rules:
+  # 99th percentile latency must stay < 150ms
+  - record: slo:latency_99th
+    expr: histogram_quantile(0.99, sum(rate(order_latency_seconds_bucket[5m])))
+
+  # 99% of orders must be successful
+  - record: slo:order_success_ratio
+    expr: sum(rate(order_success_total[5m])) / sum(rate(order_total[5m]))
