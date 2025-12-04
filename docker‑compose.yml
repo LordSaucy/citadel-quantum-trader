@@ -1199,3 +1199,16 @@ ledger-snapshot:
       - backend
     restart: unless-stopped
 
+admin-backend:
+  environment:
+    - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET}
+    - BOT_CONTROL_URL=http://bot-control:8000
+    - PROMETHEUS_URL=http://prometheus:9090
+    - SLACK_WEBHOOK=https://hooks.slack.com/services/XXX/YYY/ZZZ
+    - SLACK_VERIFICATION_TOKEN=${SLACK_VERIFICATION_TOKEN}
+    - JIRA_BASE_URL=${JIRA_BASE_URL}
+    - JIRA_USER_EMAIL=${JIRA_USER_EMAIL}
+    - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+    - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY}
+    - RARE_EVENT_S3_BUCKET=${RARE_EVENT_S3_BUCKET}
+
