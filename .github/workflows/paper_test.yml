@@ -1,0 +1,15 @@
+jobs:
+  paper-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull optimiser config
+        run: |
+          docker compose run --rm optimiser cat /opt/config/new_config.yaml > new_config.yaml
+      - name: Run paper‑trading (2 days)
+        run: |
+          docker compose run --rm citadel-bot \
+            sh -c "export CONFIG_PATH=/app/config/new_config.yaml && export BROKER_MODE=demo && python citadel_bot.py --run-for 48h"
+      - name: Evaluate paper results
+        run: |
+          python scripts/evaluate_paper.py --report paper_report.json
