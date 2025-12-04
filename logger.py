@@ -1,5 +1,6 @@
 # Example – place in src/logger.py (import everywhere)
 import logging, json, sys
+import structlog
 
 class JsonFormatter(logging.Formatter):
     def format(self, record):
@@ -20,3 +21,5 @@ handler.setFormatter(JsonFormatter())
 root = logging.getLogger()
 root.setLevel(logging.INFO)
 root.handlers = [handler]
+
+log = structlog.get_logger("cqt.ingest")
