@@ -70,4 +70,9 @@ ROLLBACK() {
   echo "$PREV_TAG" > /opt/citadel/state/last_good_tag.txt
 }
 
+if (( fail_count >= MAX_FAILS )); then
+  log "🚨 Health check failed $fail_count times – attempting rollback"
+  ROLLBACK
+  fail_count=0   # reset counter after rollback
+fi
 
