@@ -1,54 +1,44 @@
-# In config_watcher()
-def reload_config():
-    # 1️⃣ Pause new signal processing
-    from src.trading_engine import signal_queue
-    signal_queue.pause()          # implementation depends on your engine
-    # 2️⃣ Swap files & reload
-    if os.path.isfile(NEW_CONFIG_PATH):
-        os.replace(NEW_CONFIG_PATH, CONFIG_PATH)
-        from config_loader import Config
-        Config()._load()
-    # 3️⃣ Un‑pause after a short debounce
-    time.sleep(0.5)               # give the engine a moment to settle
-    signal_queue.resume()
+# ==============================================================
+# Citadel Quantum Trader – Global configuration file
+# ==============================================================
 
-    use_shadow_mode: true   # when true, bot logs signals but never sends orders
+# -----------------------------------------------------------------
+# 1️⃣  Global switches
+# -----------------------------------------------------------------
+use_shadow_mode: true          # true → log signals only, never send real orders
+scorer_mode: lightgbm          # "lightgbm" (default) or "linear" fallback
 
-scorer_mode: lightgbm   # or "linear" to fall back
-
-# -------------------------------------------------
-# Guard configuration – tweak thresholds without rebuilding
-# -------------------------------------------------
+# -----------------------------------------------------------------
+# 2️⃣  Guard configuration – thresholds that can be tweaked
+# -----------------------------------------------------------------
 guards:
+  # ---- Sentiment guard -------------------------------------------------
   sentiment:
     guard_enabled: true
-    positive_threshold: 0.30   # >0.30 → reject (over‑optimistic)
-    negative_threshold: -0.30  # <-0.30 → reject (over‑pessimistic)
+    positive_threshold: 0.30   # > 0.30 → reject (over‑optimistic)
+    negative_threshold: -0.30  # < -0.30 → reject (over‑pessimistic)
 
+  # ---- Calendar (high‑impact event) guard ------------------------------
   calendar:
     lockout_enabled: true
     lockout_margin_minutes: 30   # minutes before/after a high‑impact event
 
+  # ---- Volatility‑spike guard -----------------------------------------
   volatility_spike:
     enabled: true
-    atr_multiplier: 2.0          # current ATR > baseline * 2 → reject
-    baseline_atr: 0.0005          # you can compute this daily and reload
+    atr_multiplier: 2.0           # current ATR > baseline * 2 → reject
+    baseline_atr: 0.0005          # daily‑computed baseline ATR (reloadable)
 
+  # ---- Shock‑detector guard -------------------------------------------
   shock_detector:
     enabled: true
-    spread_multiplier: 3.0       # current spread > 3× avg spread → reject
-    max_tick_age_secs: 2         # quote older than 2 s → reject
-    lir_threshold: 0.6           # LIR > 0.6 → reject
-    min_depth: 0.02              # minimum depth as fraction of lot size
+    spread_multiplier: 3.0        # current spread > 3× avg spread → reject
+    max_tick_age_secs: 2          # quote older than 2 s → reject
+    lir_threshold: 0.6            # LIR > 0.6 → reject
+    min_depth: 0.02               # minimum depth as fraction of lot size
 
-# -------------------------------------------------
-# Guard parameters – keep this section up‑to‑date
-# -------------------------------------------------
-guards:
-  # (as shown earlier)
-
-  # -----------------------------------------------------------------
-# Venues (ordered list – the engine will query them in this order)
+# -----------------------------------------------------------------
+# 3️⃣  Venues – ordered list the engine will query
 # -----------------------------------------------------------------
 venues:
   - name: mt5_demo
@@ -59,190 +49,123 @@ venues:
     vault_path: secret/data/citadel/brokers/ibkr_demo
 
 # -----------------------------------------------------------------
-# Depth‑check parameters
+# 4️⃣  Depth‑check parameters (used by the depth‑guard)
 # -----------------------------------------------------------------
 min_depth_multiplier: 2.0   # required depth = multiplier × lot‑size
 
-# -------------------------------------------------
-# Shock‑Detector & News‑Sentiment overlay
-# -------------------------------------------------
+# -----------------------------------------------------------------
+# 5️⃣  Shock‑Detector & News‑Sentiment overlay
+# -----------------------------------------------------------------
 risk_shocks:
-  # Sentiment score outside this band will block the trade
+  # Sentiment score band – trades outside this band are blocked
   sentiment:
-    low: -0.2   # very bearish → block
-    high:  0.2   # very bullish → block (optional)
+    low:  -0.20   # very bearish → block
+    high:  0.20   # very bullish → block (optional)
 
-  # Macro‑calendar – number of minutes before/after a scheduled event
+  # Macro‑calendar – minutes before/after a scheduled event
   macro_window_minutes: 30
 
   # Volatility spike – ATR multiplier over its 30‑day EMA
-  atr_spike_multiplier: 2.0   # e.g., ATR > 2× EMA(30d) → block
+  atr_spike_multiplier: 2.0
 
   # Sudden price jump – % move in the last N minutes
   price_jump:
     window_minutes: 5
     threshold_pct: 1.5   # >1.5 % move in 5 min → block
 
-  # Edge‑decay – win‑rate floor (already exists, but we expose it here)
+  # Edge‑decay – win‑rate floor (fallback if live win‑rate unavailable)
   winrate_floor: 0.95
 
-  # -------------------------------------------------
-# Broker‑specific margin parameters (optional overrides)
-# -------------------------------------------------
+# -----------------------------------------------------------------
+# 6️⃣  Broker‑specific margin parameters (optional overrides)
+# -----------------------------------------------------------------
 broker:
-  contract_notional: 100000      # $ per standard lot (e.g., 1 lot = $100k)
-  max_leverage: 100              # broker‑declared max leverage (e.g., 1:100)
-  margin_factor: 0.01            # 1 % of notional per 1:100 leverage (derived from above)
-  # If your broker gives a direct “margin per lot” value, set it here:
-  # margin_per_lot: 1000          # $ required to open 1 lot
+  contract_notional: 100000   # $ per standard lot (e.g., 1 lot = $100k)
+  max_leverage: 100           # broker‑declared max leverage (1:100)
+  margin_factor: 0.01         # derived: 1 % of notional per 1:100 leverage
+  # If your broker gives a direct margin‑per‑lot value, uncomment:
+  # margin_per_lot: 1000      # $ required to open 1 lot
 
+# -----------------------------------------------------------------
+# 7️⃣  Monte‑Carlo draw‑down settings (used for kill‑switch)
+# -----------------------------------------------------------------
 monte_carlo_dd:
   dd_threshold: 0.05          # 5 % draw‑down at 99.9 % percentile → kill‑switch
-  num_paths: 20000            # how many Monte‑Carlo paths per run
-  trades_per_path: 1000       # length of each simulated equity curve
-  win_rate_override: null     # optional static win‑rate (e.g., 0.997). If null, use live rolling win‑rate.
-  rr_target: 5.0              # reward‑to‑risk ratio (must match the bot config)
-  schedule:                    # you can embed the schedule here or read from the DB
-    1: 1.00
-    2: 1.00
-    3: 0.60
-    4: 0.50
-    default: 0.40
-
-# src/correlation_matrix.py
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from sqlalchemy import create_engine, text
-import logging
-
-log = logging.getLogger(__name__)
+  num_paths: 20000            # Monte‑Carlo simulation paths per run
+  trades_per_path: 1000       # Length of each simulated equity curve
+  win_rate_override: null      # If you want a static win‑rate, set a float (e.g. 0.997)
+  rr_target: 5.0               # Reward‑to‑risk ratio (must match bot config)
 
 # -----------------------------------------------------------------
-# Configuration (you can also move these to config.yaml)
+# 8️⃣  Schedule – risk‑allocation per bucket (you can also store this in DB)
 # -----------------------------------------------------------------
-LOOKBACK_DAYS = 30                # rolling window length
-SYMBOLS = [                       # basket of assets you care about
-    "EURUSD", "GBPUSD", "USDJPY",
-    "XAUUSD", "WTIUSD", "SPX500", "US30"
-]
-TIMEFRAME = "1m"                  # the granularity you store (1‑minute is fine)
-
-# -----------------------------------------------------------------
-def get_close_prices(engine: "sqlalchemy.Engine") -> pd.DataFrame:
-    """
-    Returns a DataFrame indexed by timestamp with one column per symbol.
-    Only the last LOOKBACK_DAYS of data are fetched.
-    """
-    end_ts   = datetime.utcnow()
-    start_ts = end_ts - timedelta(days=LOOKBACK_DAYS)
-
-    sql = text(f"""
-        SELECT ts, symbol, close
-        FROM market_ticks
-        WHERE timeframe = :tf
-          AND ts BETWEEN :start AND :end
-          AND symbol = ANY(:symbols)
-        ORDER BY ts ASC;
-    """)
-
-    df = pd.read_sql(sql, engine,
-                     params={"tf": TIMEFRAME,
-                             "start": start_ts,
-                             "end": end_ts,
-                             "symbols": SYMBOLS})
-    # Pivot so each symbol becomes a column
-    df = df.pivot(index="ts", columns="symbol", values="close")
-    # Forward‑fill missing minutes (e.g., market‑closed periods)
-    df = df.ffill().dropna()
-    return df
-
-
-def rolling_corr_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Computes the Pearson correlation matrix over the whole DataFrame.
-    Returns a symmetric N×N DataFrame where N = len(SYMBOLS).
-    """
-    corr = df.corr(method="pearson")
-    # Force the diagonal to exactly 1.0 (numerical noise can make it 0.9999)
-    np.fill_diagonal(corr.values, 1.0)
-    return corr
-
-
-def average_correlation(corr: pd.DataFrame) -> float:
-    """
-    Returns the *off‑diagonal* average correlation.
-    """
-    n = corr.shape[0]
-    # Sum of all elements minus the diagonal, then divide by N*(N‑1)
-    total = corr.values.sum() - n   # subtract the N ones on the diagonal
-    return total / (n * (n - 1))
-
-
-def compute_and_store(engine: "sqlalchemy.Engine"):
-    """
-    Main entry point – called by a daily cron job.
-    Stores the matrix and the average correlation in a dedicated table.
-    """
-    df   = get_close_prices(engine)
-    corr = rolling_corr_matrix(df)
-    avg  = average_correlation(corr)
-
-    # Persist the matrix as JSON (PostgreSQL jsonb column)
-    matrix_json = corr.to_json(orient="split")   # includes index/columns/values
-
-    with engine.begin() as conn:
-        # Create the table if it does not exist
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS correlation_snapshots (
-                ts          TIMESTAMP PRIMARY KEY,
-                avg_corr    DOUBLE PRECISION,
-                matrix_json JSONB
-            );
-        """))
-
-        conn.execute(
-            text("""
-                INSERT INTO correlation_snapshots (ts, avg_corr, matrix_json)
-                VALUES (:ts, :avg, :matrix)
-                ON CONFLICT (ts) DO UPDATE
-                SET avg_corr = EXCLUDED.avg_corr,
-                    matrix_json = EXCLUDED.matrix_json;
-            """),
-            {"ts": datetime.utcnow(),
-             "avg": avg,
-             "matrix": matrix_json}
-        )
-    log.info(f"[Corr] Avg correlation = {avg:.3f}")
-    return avg, corr
-
-risk_schedule_normal:
+schedule:
   1: 1.00
   2: 1.00
   3: 0.60
   4: 0.50
   5: 0.40
-  # …
+  default: 0.40
 
-risk_schedule_defensive:
-  1: 0.50
-  2: 0.50
-  3: 0.30
-  4: 0.25
-  5: 0.20
-  # … 
+# -----------------------------------------------------------------
+# 9️⃣  Optimiser – weights for the confluence score
+# -----------------------------------------------------------------
+optimiser:
+  weights:
+    # Existing weights (examples – keep your current values)
+    mtf_alignment: 0.12
+    head_and_shoulders: 0.08
+    # NEW – liquidity related
+    lir: 0.15               # LIR contributes 15 % of total confluence score
+    depth: 0.05             # Small positive weight for sheer market depth
+    # … add any other feature weights you already use …
 
-  # -------------------- Feature parameters --------------------
+# -----------------------------------------------------------------
+# 🔟  Signal‑layer specific thresholds
+# -----------------------------------------------------------------
+signal:
+  lir_min_abs: 0.30          # Minimum absolute LIR required for a trade
+  depth_min_units: 20000     # Minimum total depth (bid + ask) in contract units
+
+# -----------------------------------------------------------------
+# 11️⃣  Multi‑broker routing (fallback logic)
+# -----------------------------------------------------------------
+multi_broker:
+  primary: mt5
+  secondary: ibkr
+  latency_threshold_seconds: 0.20   # 200 ms – if primary exceeds, fallback to secondary
+  fallback_enabled: true
+
+# -----------------------------------------------------------------
+# 12️⃣  Risk‑schedule (alternative schedules – you can switch at runtime)
+# -----------------------------------------------------------------
+risk_schedule:
+  normal:
+    1: 1.00
+    2: 1.00
+    3: 0.60
+    4: 0.50
+    5: 0.40
+  defensive:
+    1: 0.50
+    2: 0.50
+    3: 0.30
+    4: 0.25
+    5: 0.20
+
+# -----------------------------------------------------------------
+# 13️⃣  Feature parameters (used by various calculators)
+# -----------------------------------------------------------------
 features:
   atr_stop:
-    k_range: [1.0, 2.5]          # optimiser will search inside this range
+    k_range: [1.0, 2.5]      # optimiser will search inside this range
     period: 14
   vwap_bias:
     window_minutes: 30
   fractal_swings:
-    lookback: 10                 # number of bars to consider for fractal detection
+    lookback: 10
   time_of_day_decay:
-    london_peak_start: "08:00"    # EST
+    london_peak_start: "08:00"   # EST
     london_peak_end:   "12:00"
   regime_weights:
     trend:   "weights_trend.json"
@@ -250,120 +173,27 @@ features:
     high_vol:"weights_highvol.json"
   order_flow_delta:
     lookback_ticks: 200
+  scorer:
+    ensemble_weights:
+      linear: 0.6
+      tree:   0.4
+    # Paths to the model files
+    linear_weights_path: "models/linear_weights.json"
+    tree_model_path:     "models/tree_scorer.bin"
+    tree_feature_order:  "models/tree_feature_order.json"
 
-scorer:
-  ensemble_weights:
-    linear: 0.6
-    tree:   0.4
-  # Paths to the model files
-  linear_weights_path: models/linear_weights.json
-  tree_model_path:     models/tree_scorer.bin
-  tree_feature_order:  models/tree_feature_order.json
+# -----------------------------------------------------------------
+# 14️⃣  Baseline portfolio risk parameters
+# -----------------------------------------------------------------
+baseline_portfolio_atr: 0.005   # 0.5 % of equity (tune after first week)
+max_drawdown_cap: 0.20          # static cap = 20 %
 
-class Config:
-    def __init__(self):
-        with open('/opt/citadel/config/config.yaml') as f:
-            self.settings = yaml.safe_load(f)
-
-        # -----------------------------------------------------------------
-        # 1️⃣  Apply experiment‑specific overrides
-        # -----------------------------------------------------------------
-        exp = os.getenv('EXPERIMENT', 'BASELINE').upper()
-        if exp == 'WITH_LIR':
-            # Enable the Liquidity‑Imbalance Ratio guard
-            self.settings['risk_controls']['use_lir'] = True
-        elif exp == 'NO_LIR':
-            self.settings['risk_controls']['use_lir'] = False
-        # Add more branches for other experiments (XGBOOST_MODEL, DYNAMIC_RISK, …)
-
-        # -----------------------------------------------------------------
-        # 2️⃣  Choose the DB schema (default = public)
-        # -----------------------------------------------------------------
-        self.settings['db_schema'] = os.getenv('DB_SCHEMA', 'public')
-
-        import os
-import yaml
-from pathlib import Path
-
-def load_config() -> dict:
-    """
-    Load the YAML config that drives the bot.
-    If the env‑var USE_OPTIMISED_CFG=true the loader swaps the
-    default config file for the new, optimised one.
-    """
-    use_opt = os.getenv("USE_OPTIMISED_CFG", "false").lower() == "true"
-    cfg_path = Path("/opt/citadel/config")
-    cfg_file = cfg_path / ("config_opt.yml" if use_opt else "config.yml")
-
-    if not cfg_file.is_file():
-        raise FileNotFoundError(f"Configuration file missing: {cfg_file}")
-
-    with cfg_file.open("r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-
-    # Optional sanity‑check (already in the validator)
-    if not isinstance(cfg, dict):
-        raise ValueError("Config must be a mapping")
-    return cfg
-
-
-        baseline_portfolio_atr: 0.005   # 0.5 % of equity (tune after first week)
-max_drawdown_cap: 0.20         # static cap = 20 %
-
-brokers:
-  - name: mt5
-    type: mt5
-    vault_path: secret/data/citadel/brokers/mt5/account_1
-  - name: ibkr
-    type: ibkr
-    vault_path: secret/data/citadel/brokers/ibkr/account_1
-  - name: ctrader
-    type: ctrader
-    api_url: https://api.ctrader.com/v2
-    api_key: "<PLACEHOLDER>"   # will be pulled from Vault
-  - name: ninjatrader
-    type: ninjatrader
-    api_url: https://api.ninjatrader.com/v1
-    client_id: "<PLACEHOLDER>"
-    client_secret: "<PLACEHOLDER>"
-  - name: tradovate
-    type: tradovate
-    api_url: https://api.tradovate.com/v1
-    access_token: "<PLACEHOLDER>"
-
-multi_broker:
-  primary: "mt5"
-  secondary: "ibkr"
-  latency_threshold_seconds: 0.20   # 200 ms
-  fallback_enabled: true
-
-optimiser:
-  weights:
-    # Existing weights …
-    mtf_alignment: 0.12
-    head_and_shoulders: 0.08
-    # NEW – liquidity related
-    lir: 0.15               # LIR contributes 15 % of the total confluence score
-    depth: 0.05             # Small positive weight for sheer market depth
-
-signal:
-  lir_min_abs: 0.30          # block trades unless LIR magnitude ≥ 30 %
-risk:
-  depth_min_units: 20000    # depth‑guard requires ≥ 20 k contract units
-optimiser:
-  weights:
-    lir: 0.15
-    depth: 0.05
-    # … other weights …
-
-git add config.yaml
-git commit -m "Tune LIR: weight=0.18, min_abs=0.35, depth_min_units=18000"
-git push origin main
-
-# config.yaml (add a new section)
+# -----------------------------------------------------------------
+# 15️⃣  Event‑window configuration (used by calendar‑based filters)
+# -----------------------------------------------------------------
 event_window:
-  pre_minutes: 5      # minutes BEFORE the event timestamp
-  post_minutes: 15    # minutes AFTER the event timestamp
+  pre_minutes: 5               # minutes BEFORE the event timestamp
+  post_minutes: 15             # minutes AFTER the event timestamp
   impact_bias:
     high:   0.07
     medium: 0.04
