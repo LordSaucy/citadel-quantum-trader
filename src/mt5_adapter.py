@@ -142,3 +142,10 @@ class MT5Adapter:
 
         return response
 
+class BaseBroker(ABC):
+    @abstractmethod
+    def place_order(self, symbol, direction, volume, price, sl, tp): ...
+    @abstractmethod
+    def cancel_all(self): ...
+    @abstractmethod
+    def get_position(self, symbol): ...
