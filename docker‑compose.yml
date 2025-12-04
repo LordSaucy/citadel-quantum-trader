@@ -1226,4 +1226,7 @@ citadel-bot:
     ...
 
 
+citadel-bot:
+  environment:
+    - LUMO_ENV=demo   # forces the bot to use the demo broker endpoints
 
