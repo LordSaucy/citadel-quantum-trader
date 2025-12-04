@@ -18,3 +18,23 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70   # <-- 70 % of a *single* CPU core per pod
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "citadel.fullname" . }}-hpa-custom
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "citadel.fullname" . }}
+  minReplicas: {{ .Values.replicaCount | default 6 }}
+  maxReplicas: 200
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: orders_per_sec
+        target:
+          type: AverageValue
+          averageValue: "30"   # 30 orders/sec per pod → add a pod when avg > 30
