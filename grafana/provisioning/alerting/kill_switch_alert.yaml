@@ -1,0 +1,15 @@
+# grafana/provisioning/alerting/kill_switch_alert.yaml
+apiVersion: 1
+groups:
+  - name: "Kill‑Switch"
+    interval: 15s
+    rules:
+      - alert: KillSwitchActive
+        expr: cqt_kill_switch_active == 1
+        for: 30s
+        annotations:
+          summary: "Kill‑switch is ACTIVE"
+          description: "The system has entered a protective kill‑switch state – all order submission is halted."
+        labels:
+          severity: critical
+          channel: slack
