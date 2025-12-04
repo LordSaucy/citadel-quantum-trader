@@ -8,9 +8,16 @@ from config_loader import Config   # a tiny wrapper that loads config.yaml
 from utils import standardize      # optional z‑score normalizerfrom .scorer import build_scorer
 from .regime_selector import RegimeSelector
 from .scorer import build_scorer
+from src.models.lstm_regime import predict_regime as lstm_pred
+from src.models.hmm_regime import predict_hmm as hmm_pred
+from src.models.garch_vol import forecast_sigma, garch_res
+from src.regime_ensemble import regime_consensus, candidate_signals_total, accepted_signals_total
+
 
 
 cfg = Config().settings
+
+
 
 class SignalEngine:
     def __init__(self):
@@ -148,3 +155,29 @@ def compute_confluence_score(features: dict) -> float:
         base_score = min(1.0, base_score + bias)   # cap at 1.0
     # ------------------------------------------------------------------
     return base_score
+
+def should_enter_trade(features: dict) -> bool:
+    """
+    Entry‑point called by the main trading loop for each
+    candidate signal that passed the 7‑lever SMC pre‑filter.
+    Returns True → trade is allowed, False → discard.
+    """
+
+    # 1️⃣ Count the raw candidate (pre‑ensemble)
+    candidate_signals_total.inc()
+
+    # 2️⃣ Run the consensus gate
+    if not regime_consensus(features):
+        # No need to log a failure here – the counter already captures it.
+        return False
+
+    # 3️⃣ Passed the gate → increment the success counter
+    accepted_signals_total.inc()
+    return True
+
+if should_enter_trade(current_features):
+    # Proceed with the usual SMC / risk‑manager pipeline
+    execute_trade(...)
+else:
+    logger.debug("Regime ensemble rejected trade")
+
