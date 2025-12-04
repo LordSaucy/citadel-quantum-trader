@@ -287,3 +287,15 @@ receivers:
   - url: http://127.0.0.1:9099/rollback   # a tiny Flask app you run locally
     send_resolved: false
 
+groups:
+  - name: production
+    rules:
+      - alert: ProductionExpectancyDrop
+        expr: (live_expectancy / on() group_left optimiser_last_fitness) < 0.90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Live expectancy dropped >10 % vs. last optimiser"
+          description: "Investigate immediately – automatic rollback will be triggered."
+
