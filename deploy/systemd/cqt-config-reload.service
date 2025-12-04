@@ -1,0 +1,11 @@
+# /etc/systemd/system/cqt-config-reload.service
+[Unit]
+Description=CQT Config Reload Service
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/citadel/config_loader.py
+StandardOutput=journal
+StandardError=inherit
