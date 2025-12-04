@@ -434,3 +434,50 @@ jobs:
     pip install -r requirements.txt
     pytest tests/unit/guard_helpers_test.py -q
 
+  multi‑asset‑validation:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.build-and-push.outputs.image-tag }}
+      env:
+        # Use the same env vars the local scripts expect
+        VAULT_SECRET_PATH: secret/data/citadel/demo_mt5
+        PAPER_MODE: "true"
+        POSTGRES_HOST: postgres
+        POSTGRES_USER: citadel
+        POSTGRES_PASSWORD: citadel_pw
+        POSTGRES_DB: citadel
+        REDIS_HOST: redis
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: citadel
+          POSTGRES_PASSWORD: citadel_pw
+          POSTGRES_DB: citadel
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U citadel"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: [6379:6379]
+    steps:
+      - name: Wait for DB & Redis
+        run: |
+          for i in {1..30}; do
+            nc -z localhost 5432 && nc -z localhost 6379 && break || sleep 2
+          done
+      - name: Run multi‑asset validation script
+        run: |
+          python scripts/multi_asset_validation.py
+      - name: Archive per‑asset results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi‑asset‑validation‑results
+          path: |
+            backtest_summary_*.json
+            backtest_trades_*.csv
