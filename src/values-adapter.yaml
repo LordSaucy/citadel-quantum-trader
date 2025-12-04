@@ -1,0 +1,13 @@
+rules:
+  default: false
+  custom:
+    - seriesQuery: 'citadel_orders_per_sec'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: ""
+        as: "orders_per_sec"
+      metricsQuery: sum(rate(citadel_orders_per_sec[1m]))
+
