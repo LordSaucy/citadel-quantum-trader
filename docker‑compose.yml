@@ -46,6 +46,18 @@ volumes:
 
 services:
 
+services:
+  citadel-bot:
+    # ...
+    user: "1000:1000"          # UID:GID of the 'lumo' user (check with `id -u lumo`)
+    read_only: true            # makes the container filesystem read‑only (except for /run and /tmp)
+    tmpfs:
+      - /run
+      - /tmp
+    security_opt:
+      - no-new-privileges:true   # prevents the process from gaining new privileges via setuid binaries
+
+
 # ----------------------------------------------------------------------
 #  1️⃣  ENGINE (primary / standby – identical definition)
 # ----------------------------------------------------------------------
