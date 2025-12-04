@@ -302,3 +302,14 @@ groups:
             Check the `ledger-snapshot-exporter` container logs and the IAM permissions
             for the KMS key and S3 bucket.
 
+groups:
+  - name: regime-alerts
+    rules:
+      - alert: HighRegimeRejectRate
+        expr: (regime_mismatch_total / (regime_match_total + regime_mismatch_total)) > 0.30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Regime‑reject rate > 30 %"
+          description: "The bot is rejecting most signals because the live regime does not match any profitable historical regime. Consider lowering the similarity threshold or reviewing the regime bank."
