@@ -1,4 +1,4 @@
-# ----------------------------------------------------------------------
+stop_grace_period# ----------------------------------------------------------------------
 # Production Docker‑Compose for Citadel Quantum Trader (CQT)
 # ----------------------------------------------------------------------
 #   • Engine (primary & standby) – runs the Python trading bot,
@@ -1138,3 +1138,10 @@ services:
       - redis
     networks:
       - backend
+
+citadel-bot:
+  # … existing config …
+  stop_grace_period: 30s          # give the app up to 30 s to finish
+  # (optional) expose the stop signal explicitly
+  # (Docker defaults to SIGTERM, but you can be explicit)
+  # stop_signal: SIGTERM
