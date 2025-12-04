@@ -1298,4 +1298,38 @@ cassandra:
 volumes:
   cassandra-data:
 
+# -------------------------------------------------
+# Loki (log aggregation)
+# -------------------------------------------------
+loki:
+  image: grafana/loki:2.9.5
+  command: -config.file=/etc/loki/local-config.yaml
+  volumes:
+    - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+  ports:
+    - "3100:3100"
+
+# -------------------------------------------------
+# Promtail (ships container logs to Loki)
+# -------------------------------------------------
+promtail:
+  image: grafana/promtail:2.9.5
+  volumes:
+    - /var/log:/var/log
+    - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    - ./promtail/config.yaml:/etc/promtail/config.yaml:ro
+  command: -config.file=/etc/promtail/config.yaml
+
+# -------------------------------------------------
+# Tempo (trace storage)
+# -------------------------------------------------
+tempo:
+  image: grafana/tempo:2.5.0
+  command: -config.file=/etc/tempo/tempo.yaml
+  volumes:
+    - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+  ports:
+    - "3200:3200"   # OTLP ingest (grpc)
+    - "4318:4318"   # OTLP ingest (http)
+
 
