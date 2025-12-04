@@ -1272,3 +1272,30 @@ services:
     # Optional: run only at a specific time using a host‑level cron that
     # does `docker compose run --rm calendar-fetch`.  Systemd timer is
     # generally simpler.
+
+jaeger:
+  image: jaegertracing/all-in-one:1.53   # replace with the “Cassandra” variant
+  environment:
+    SPAN_STORAGE_TYPE: cassandra
+    CASSANDRA_SERVERS: cassandra
+    CASSANDRA_KEYSPACE: jaeger_v1
+  ports:
+    - "16686:16686"
+    - "14268:14268"
+  depends_on:
+    - cassandra
+
+cassandra:
+  image: cassandra:4.1
+  environment:
+    - MAX_HEAP_SIZE=512M
+    - HEAP_NEWSIZE=128M
+  volumes:
+    - cassandra-data:/var/lib/cassandra
+  ports:
+    - "9042:9042"
+
+volumes:
+  cassandra-data:
+
+
