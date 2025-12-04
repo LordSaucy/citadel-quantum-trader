@@ -118,3 +118,18 @@ def record_order():
     # after a successful order:
     orders_per_sec.inc()
 
+latest_file_age_seconds = Gauge(
+    "cqt_latest_data_age_seconds",
+    "Age of the most recent OHLCV file per symbol",
+    ["symbol"]
+)
+
+def update_data_age_metrics():
+    for sym in SYMBOLS:
+        # find newest file for this symbol
+        files = list((BASE_DATA_DIR / sym).glob(f"{sym}_*.parquet"))
+        if not files:
+            continue
+        newest = max(files, key=lambda p: p.stat().st_mtime)
+        age = time.time() - newest.stat().st_mtime
+        latest_file_age_seconds.labels(symbol=sym).set(age)
