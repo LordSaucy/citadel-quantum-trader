@@ -1,0 +1,23 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "cqt-mission-control",
+    "title": "CQT Mission‑Control",
+    "panels": [
+      {
+        "type": "graph",
+        "title": "Order Latency",
+        "targets": [{ "expr": "cqt_order_latency_seconds", "legendFormat": "{{bucket_id}}" }]
+      },
+      {
+        "type": "stat",
+        "title": "Liquidity Imbalance Ratio (LIR)",
+        "targets": [{ "expr": "cqt_liquidity_imbalance_ratio", "legendFormat": "{{symbol}}" }]
+      }
+    ],
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "5s"
+  },
+  "overwrite": true
+}
