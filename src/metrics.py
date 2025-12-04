@@ -235,3 +235,15 @@ def start_prometheus(port: int = 9090):
     """
     start_http_server(port)
     # No blocking – the server runs in its own thread.
+
+groups:
+- name: citadel_slo
+  interval: 30s
+  rules:
+  # 1. Boolean: 1 if latency > 150 ms, else 0
+  - record: slo:latency_error
+    expr: histogram_quantile(0.99, sum(rate(order_latency_seconds_bucket[5m])) by (le)) > 0.15
+
+  # 2. Error‑budget consumption (percentage of allowed errors used)
+  - record: slo:latency_error_budget_consumed
+    expr: (sum(slo:latency_error[1h]) / (3600 * 0.05)) * 100
