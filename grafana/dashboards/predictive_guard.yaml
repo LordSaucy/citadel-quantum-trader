@@ -1,0 +1,11 @@
+# grafana/provisioning/dashboards/predictive_guard.yaml
+apiVersion: 1
+providers:
+  - name: "Predictive Guard"
+    orgId: 1
+    folder: "Citadel QTR"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/dashboards
