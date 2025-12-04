@@ -1,0 +1,4 @@
+- name: Activate new config in production
+  if: success() && needs.shadow.outputs.passed == 'true'
+  run: |
+    docker compose exec citadel-bot /app/scripts/activate_new_cfg.sh
