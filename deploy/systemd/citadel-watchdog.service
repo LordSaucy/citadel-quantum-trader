@@ -1,37 +1,15 @@
 [Unit]
-Description=Citadel Quantum Trader – Watchdog (fail‑over)
+Description=Citadel Quantum Trader – Watchdog & Automatic Fail‑Over
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/opt/citadel/watchdog.sh
+ExecStart=/opt/cqt/watchdog.sh
 Restart=always
 RestartSec=5
-User=citadel
-Group=citadel
-Environment=SLACK_WEBHOOK_URL=https://hooks.slack.com/services/XXX/YYY/ZZZ   # optional
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-
-[Unit]
-Description=Citadel Quantum Trader – Watchdog
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/opt/citadel/watchdog.sh
-Restart=always
-User=citadel
-Group=citadel
-Environment=WEBHOOK=https://hooks.slack.com/services/XXX/YYY/ZZZ   # Slack alert on failover
-StandardOutput=syslog
-StandardError=syslog
-SyslogIdentifier=citadel-watchdog
+User=root
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target
