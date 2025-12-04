@@ -28,3 +28,19 @@ async def resume_all():
 
 async def kill_switch():
     return await _post("/api/v1/kill-switch")
+# admin_ui/backend/app/bot_control.py (replace existing placeholder)
+import aiohttp
+import os
+
+BOT_CONTROL_URL = os.getenv("BOT_CONTROL_URL", "http://bot-control:8000")
+
+async def _post(path: str):
+    async with aiohttp.ClientSession() as s:
+        async with s.post(f"{BOT_CONTROL_URL}{path}") as resp:
+            if resp.status != 200:
+                txt = await resp.text()
+                raise RuntimeError(f"{path} failed: {resp.status} {txt}")
+            return await resp.json()
+
+async def kill_switch():
+    return await _post("/api/v1/kill-switch")
