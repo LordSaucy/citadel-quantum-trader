@@ -1164,4 +1164,24 @@ volumes:
     restart: unless-stopped
 volumes:
   redis-data:
+# docker‑compose.yml addition
+ledger-snapshot:
+  image: python:3.11-slim
+  container_name: citadel-ledger-snapshot
+  working_dir: /app
+  volumes:
+    - ./src:/app/src
+    - ./config:/app/config
+  environment:
+    - AWS_DEFAULT_REGION=us-east-1
+    - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+    - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+  command: >
+    /bin/sh -c "while true; do
+      python -m src.trade_logger push_root_to_s3;
+      sleep 3600;
+    done"
+  networks:
+    - backend
+  restart: unless-stopped
 
