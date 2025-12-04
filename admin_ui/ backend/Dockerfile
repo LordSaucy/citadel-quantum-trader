@@ -82,3 +82,10 @@ COPY migrations/2025-11-30_add_aggressive_pool.sql /docker-entrypoint-initdb.d/
 
 RUN apt-get update && apt-get install -y libta-lib0 libta-lib-dev
 
+# admin_backend/Dockerfile – add a cron entry
+RUN apt-get update && apt-get install -y cron
+COPY cronjob /etc/cron.d/drift
+RUN chmod 0644 /etc/cron.d/drift && crontab /etc/cron.d/drift
+CMD ["cron", "-f"]
+
+
