@@ -1,0 +1,14 @@
+apiVersion: 1
+groups:
+  - name: "Liquidity‑Imbalance"
+    interval: 30s
+    rules:
+      - alert: ExtremeLiquidityImbalance
+        expr: cqt_liquidity_imbalance_ratio{bucket_id="B1",symbol="EURUSD"} > 0.35
+        for: 2m
+        annotations:
+          summary: "LIR > 0.35 for bucket B1/EURUSD"
+          description: "Liquidity imbalance is dangerously high – consider pausing the bot."
+        labels:
+          severity: critical
+          channel: slack
