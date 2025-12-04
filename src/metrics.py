@@ -133,3 +133,31 @@ def update_data_age_metrics():
         newest = max(files, key=lambda p: p.stat().st_mtime)
         age = time.time() - newest.stat().st_mtime
         latest_file_age_seconds.labels(symbol=sym).set(age)
+
+# Existing gauges – add `asset_class` label
+LATENCY_GAUGE = Gauge(
+    "cqt_latency_seconds",
+    "Order submission latency (seconds)",
+    ["symbol", "asset_class"]
+)
+
+REJECT_COUNTER = Counter(
+    "cqt_reject_total",
+    "Total number of order rejections",
+    ["symbol", "asset_class"]
+)
+
+SLIPPAGE_GAUGE = Gauge(
+    "cqt_slippage",
+    "Absolute slippage per filled order (pips or usd)",
+    ["symbol", "asset_class"]
+)
+
+def record_latency(symbol: str, asset_class: str, secs: float):
+    LATENCY_GAUGE.labels(symbol=symbol, asset_class=asset_class).set(secs)
+
+def record_reject(symbol: str, asset_class: str):
+    REJECT_COUNTER.labels(symbol=symbol, asset_class=asset_class).inc()
+
+def record_slippage(symbol: str, asset_class: str, amount: float):
+    SLIPPAGE_GAUGE.labels(symbol=symbol, asset_class=asset_class).set(amount)
