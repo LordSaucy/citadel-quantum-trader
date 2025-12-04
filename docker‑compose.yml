@@ -1185,3 +1185,17 @@ ledger-snapshot:
     - backend
   restart: unless-stopped
 
+ ledger-snapshot-exporter:
+    build:
+      context: ./admin_ui/backend          # reuse the same Dockerfile (Python)
+      dockerfile: Dockerfile
+    container_name: citadel-ledger-exporter
+    command: ["python", "-m", "src.ledger_snapshot_exporter"]
+    environment:
+      - LEDGER_S3_BUCKET=${LEDGER_S3_BUCKET}
+      - KMS_SIGNING_KEY_ARN=${KMS_SIGNING_KEY_ARN}
+      - AWS_DEFAULT_REGION=us-east-1
+    networks:
+      - backend
+    restart: unless-stopped
+
