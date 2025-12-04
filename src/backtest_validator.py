@@ -631,3 +631,7 @@ def export_trades_to_csv(self, filepath: Union[str, pathlib.Path]) -> None:
                 "win":         trade["win"]
             })
 
+# Inside the loop that processes each signal:
+static_frac = self.risk_schedule.get(trade_number, self.risk_schedule.get('default', 0.004))
+# Ask the engine for the *dynamic* stake
+stake = engine.compute_stake(symbol, bucket_equity, static_frac)
