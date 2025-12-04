@@ -25,6 +25,16 @@ from prometheus_client import start_http_server, Counter
 import time, os, yaml
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+import os
+import logging
+from datetime import datetime
+from src.utils.asset_classifier import classify_asset
+from src.data_feed.feed_factory import get_feed
+from src.execution.broker_router import get_broker
+from src.backtest.validator import BacktestValidator
+from src.risk.volatility_scaler import scale_risk
+from src.risk.session_manager import allowed_now
+
 
 
 # ----------------------------------------------------------------------
@@ -568,3 +578,40 @@ observer.start()
 if redis.get("kill_switch_active") == b"1":
     logger.info("Kill‑switch active – skipping trade")
     continue   # go to next iteration, no new entry
+log = logging.getLogger(__name__)
+
+def build_components(symbol: str):
+    """Factory that returns the correct feed, broker, and risk multiplier."""
+    asset_class = classify_asset(symbol)
+
+    # 1️⃣ Data feed
+    feed = get_feed(asset_class)
+
+    # 2️⃣ Broker (execution)
+    broker = get_broker(asset_class)
+
+    # 3️⃣ Risk scaling (per‑asset volatility)
+    risk_pct = scale_risk(symbol, base_risk_pct=1.0)   # 1 % baseline
+
+    return feed, broker, risk_pct
+
+def run_one_symbol(symbol: str):
+    """Entry‑point used by the scheduler / back‑test runner."""
+    if not allowed_now(symbol, datetime.utcnow()):
+        log.info(f"⏸️  Trading for {symbol} skipped – outside allowed session")
+        return
+
+    feed, broker, risk_pct = build_components(symbol)
+
+    validator = BacktestValidator(
+        initial_balance=100_000,
+        risk_per_trade=risk_pct,
+    )
+
+    # Example: run a live‑loop (simplified)
+    while True:
+        df = feed.fetch(symbol, timeframe="M5")
+        signal = generate_signal(df)   # your existing strategy function
+        if signal:
+            broker.place_order(**signal)
+        time.sleep(5)   # polling interval – adjust as needed
