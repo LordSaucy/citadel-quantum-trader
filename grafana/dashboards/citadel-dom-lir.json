@@ -1,0 +1,84 @@
+{
+  "uid": "citadel-dom-lir",
+  "title": "Citadel – Liquidity & LIR",
+  "panels": [
+    {
+      "type": "gauge",
+      "title": "Liquidity Imbalance Ratio (LIR)",
+      "gridPos": {"x":0,"y":0,"w":12,"h":8},
+      "targets": [
+        {
+          "expr": "bucket_liquidity_imbalance_ratio",
+          "legendFormat": "Bucket {{bucket_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": -1,
+          "max": 1,
+          "thresholds": {
+            "mode":"absolute",
+            "steps":[
+              {"value":-0.8,"color":"red"},
+              {"value":-0.3,"color":"orange"},
+              {"value":0.3,"color":"green"},
+              {"value":0.8,"color":"orange"},
+              {"value":1,"color":"red"}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Total Market Depth (Bid + Ask) – Top 20 Levels",
+      "gridPos": {"x":12,"y":0,"w":12,"h":8},
+      "targets": [
+        {
+          "expr": "bucket_market_depth",
+          "legendFormat": "Bucket {{bucket_id}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode":"absolute",
+            "steps":[
+              {"value":5000,"color":"red"},
+              {"value":20000,"color":"orange"},
+              {"value":50000,"color":"green"}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "LIR History (per bucket)",
+      "gridPos": {"x":0,"y":8,"w":24,"h":12},
+      "targets": [
+        {
+          "expr": "bucket_liquidity_imbalance_ratio",
+          "legendFormat": "Bucket {{bucket_id}}",
+          "refId": "C"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "yaxes": [
+        {"format":"percent","label":"LIR","logBase":1,"show":true},
+        {"show":false}
+      ]
+    }
+  ],
+  "templating": {"list":[]},
+  "refresh": "30s",
+  "schemaVersion": 30,
+  "version": 1
+}
