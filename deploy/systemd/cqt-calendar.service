@@ -1,0 +1,28 @@
+# ------------------------------------------------------------
+# cqt-calendar.service – runs the economic‑calendar fetcher
+# ------------------------------------------------------------
+[Unit]
+Description=CQT Economic Calendar Daily Fetch
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+# Run as root (systemd) but execute inside the container as the cqt user
+# Replace <container_name> with the name you gave the FastAPI container
+# (in docker‑compose we used `cqt-api` or `cqt-engine` – adjust accordingly)
+ExecStart=/usr/bin/docker exec cqt-api /usr/local/bin/fetch_events.py
+# If you use the engine container instead:
+# ExecStart=/usr/bin/docker exec cqt-engine /usr/local/bin/fetch_events.py
+
+# Ensure the service inherits the Docker secret environment (the container already has it)
+# No extra environment needed on the host.
+
+# Timeout after 5 minutes (the script should finish well before that)
+TimeoutSec=300
+
+# Restart policy – we *do not* want automatic restarts; a failure will be logged.
+Restart=no
+
+# Log to the system journal (useful for debugging)
+StandardOutput=journal
+StandardError=inherit
