@@ -1145,3 +1145,11 @@ citadel-bot:
   # (optional) expose the stop signal explicitly
   # (Docker defaults to SIGTERM, but you can be explicit)
   # stop_signal: SIGTERM
+
+citadel-bot:
+  # …
+  volumes:
+    - bot_state:/var/lib/citadel/state   # persistent volume
+  # …
+volumes:
+  bot_state:
