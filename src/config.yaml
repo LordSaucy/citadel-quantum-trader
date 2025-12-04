@@ -336,3 +336,12 @@ multi_broker:
   secondary: "ibkr"
   latency_threshold_seconds: 0.20   # 200 ms
   fallback_enabled: true
+
+optimiser:
+  weights:
+    # Existing weights …
+    mtf_alignment: 0.12
+    head_and_shoulders: 0.08
+    # NEW – liquidity related
+    lir: 0.15               # LIR contributes 15 % of the total confluence score
+    depth: 0.05             # Small positive weight for sheer market depth
