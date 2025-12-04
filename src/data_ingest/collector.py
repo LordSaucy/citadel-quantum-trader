@@ -84,6 +84,14 @@ def fetch_mt5(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
     utc_end   = int(end.timestamp())
 
     rates = mt5.copy_rates_range(symbol, tf, utc_start, utc_end)
+# Inside fetch_mt5, after copying rates:
+depth = mt5.market_book_get(symbol)   # returns a list of depth levels
+# Convert to a DataFrame, store alongside OHLCV or in a separate parquet:
+depth_df = pd.DataFrame(depth)
+depth_path = parquet_path(BASE_DATA_DIR, f"{symbol}_depth", day)
+depth_df.to_parquet(depth_path, compression="snappy")
+
+    
     mt5.shutdown()
 
     if rates is None or len(rates) == 0:
