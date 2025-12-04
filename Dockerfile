@@ -203,3 +203,23 @@ WORKDIR /app
 RUN pip install prometheus-api-client requests
 COPY rollback_watcher.py .
 CMD ["python", "rollback_watcher.py"]
+
+# ------------------------------------------------------------
+# 6️⃣  FastAPI service (runs alongside the engine)
+# ------------------------------------------------------------
+FROM python:3.12-slim AS api
+
+WORKDIR /app
+
+# Copy only the API‑related source (you can copy the whole src/ if you like)
+COPY src/ src/
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Expose the API port (you already expose 8005 for the Flask API;
+# we’ll reuse the same port for the FastAPI control plane)
+EXPOSE 8005
+
+# Entrypoint – run uvicorn with the FastAPI app
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8005"]
