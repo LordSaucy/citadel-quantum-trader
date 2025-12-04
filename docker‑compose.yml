@@ -1,55 +1,59 @@
-stop_grace_period# ----------------------------------------------------------------------
-# Production Docker‑Compose for Citadel Quantum Trader (CQT)
-# ----------------------------------------------------------------------
-#   • Engine (primary & standby) – runs the Python trading bot,
-#     exposes:
-#        • 8005  – Flask ConfluenceController API (TLS terminated by the LB)
-#        • 8000  – /metrics endpoint for Prometheus
-#   • PostgreSQL / TimescaleDB – immutable ledger
-#   • Prometheus – scrapes engine metrics, DB exporter, node‑exporter
-#   • Grafana – Mission‑Control UI (auto‑imports datasource & dashboards)
-#   • backup‑svc – tiny container that snapshots the DB volume & ships logs
-# ----------------------------------------------------------------------
-# NOTE:
-#   • All secrets (DB password, API token, broker credentials, etc.)
-#     are created **externally** on each engine droplet with:
-#        docker secret create <NAME> -
-#   • The .env file (checked‑in) holds static, non‑secret values.
-#   • The VPC CIDR is assumed to be 10.10.0.0/16 – adjust if yours differs.
-# ----------------------------------------------------------------------
+# ======================================================================
+#  Citadel Quantum Trader – Production Docker‑Compose
+# ======================================================================
+# This file is **single‑source of truth** for every container that runs
+# on the Vultr droplets (engine, DB, monitoring, backup, admin UI, etc.).
+# All secrets are injected as Docker secrets – they are **not** stored in
+# this file.  The `.env` file (checked‑in) contains only static,
+# non‑secret defaults (ports, mode flags, etc.).
+#
+#   • Primary & standby engines use the **same compose file** – the only
+#     difference is the private IP each droplet owns (the Managed Load
+#     Balancer points to both).
+#   • The Managed Load Balancer terminates TLS on port 443 and health‑
+#     checks `/healthz` on port 8005.
+#   • Services that need persistence (PostgreSQL, Prometheus, Grafana,
+#     Loki) have named volumes.
+#   • Optional side‑cars (OTel Collector, Jaeger, Alertmanager, Pushgateway)
+#     are included for full observability.
+# ======================================================================
 
 version: "3.9"
 
 # ----------------------------------------------------------------------
-# Networks – a single isolated bridge network shared by all containers.
+#  NETWORKS
 # ----------------------------------------------------------------------
 networks:
   cqt-net:
     driver: bridge
 
 # ----------------------------------------------------------------------
-# Volumes – persistent storage for DB, Prometheus, Grafana.
+#  VOLUMES (persistent storage)
 # ----------------------------------------------------------------------
 volumes:
-  pg_data:          {}   # PostgreSQL data (NVMe block storage)
-  prom_data:        {}   # Prometheus TSDB
-  grafana_data:     {}   # Grafana dashboards / plugins
+  pg_data:            {}   # PostgreSQL data (NVMe block storage)
+  prom_data:          {}   # Prometheus TSDB
+  grafana_data:       {}   # Grafana dashboards/plugins
+  loki_data:          {}   # Loki log chunks
+  backup_scripts:     {}   # Mounts the backup scripts into the backup container
+  admin_frontend:     {}   # Built Vite UI (static assets)
+  admin_backend:      {}   # FastAPI backend (static files are copied here)
+  sentinel:           {}   # Empty volume used only for “stop_grace_period”
 
-# ----------------------------------------------------------------------
-# Services
-# ----------------------------------------------------------------------
+# ======================================================================
+#  SERVICES
+# ======================================================================
+
 services:
 
-  # --------------------------------------------------------------
-  # 1️⃣  Engine – primary (the same compose file is used on the
-  #     standby droplet – the only difference is the droplet’s
-  #     private IP; the Load‑Balancer routes traffic to both.)
-  # --------------------------------------------------------------
+# ----------------------------------------------------------------------
+#  1️⃣  ENGINE (primary / standby – identical definition)
+# ----------------------------------------------------------------------
   engine:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:latest
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:${IMAGE_TAG:-latest}
     container_name: cqt-engine
     restart: unless-stopped
-    env_file: [.env]                     # static defaults (host, ports, modes)
+    env_file: [.env]                     # static, non‑secret values
     secrets:
       - POSTGRES_PASSWORD
       - CQT_API_TOKEN
@@ -57,8 +61,8 @@ services:
       - IBKR_API_KEY
       - IBKR_SECRET
     ports:
-      - "8005:8005"   # ConfluenceController API (exposed to the LB)
-      - "8000:8000"   # /metrics endpoint (scraped by Prometheus)
+      - "8005:8005"                     # FastAPI control API (exposed to LB)
+      - "8000:8000"                     # /metrics endpoint (scraped by Prometheus)
     depends_on:
       - db
     networks:
@@ -68,18 +72,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    stop_grace_period: 30s               # give the app time to finish pending work
 
-  # --------------------------------------------------------------
-  # 2️⃣  PostgreSQL / TimescaleDB – immutable ledger
-  # --------------------------------------------------------------
+# ----------------------------------------------------------------------
+#  2️⃣  POSTGRESQL / TIMESCALEDB (immutable ledger)
+# ----------------------------------------------------------------------
   db:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-db:latest
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-db:${IMAGE_TAG:-latest}
     container_name: cqt-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: cqt_user
-      POSTGRES_DB: cqt_ledger
-      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD   # Docker‑Secret
+      POSTGRES_USER: citadel
+      POSTGRES_DB: citadel
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
     secrets:
       - POSTGRES_PASSWORD
     ports:
@@ -92,66 +97,15 @@ services:
     networks:
       - cqt-net
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "cqt_user"]
+      test: ["CMD", "pg_isready", "-U", "citadel"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-services:
-  # -------------------------------------------------
-  # PostgreSQL – primary (with WAL archiving)
-  # -------------------------------------------------
-  citadel-db:
-    image: postgres:15
-    container_name: citadel-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: citadel
-      POSTGRES_PASSWORD_FILE: /run/secrets/db_password   # already used elsewhere
-      POSTGRES_DB: citadel
-      # ---- NEW: enable logical WAL + archiving ----
-      POSTGRES_INITDB_ARGS: "--wal-level=logical"
-      # The following three are read by the entrypoint script and appended
-      # to postgresql.conf *before* the server starts.
-      PGARCHIVE_MODE: "on"
-      PGARCHIVE_COMMAND: "aws s3 cp %p s3://citadel-audit/wal/%f"
-      # (optional) keep a few extra segments locally
-      PG_WAL_KEEP_SEGMENTS: "64"
-    secrets:
-      - db_password
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    # ---- AWS credentials (choose ONE of the three methods) ----
-    # 1️⃣ Pass via env‑vars (good for dev / testing)
-    # environment:
-    #   AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
-    #   AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
-    #   AWS_DEFAULT_REGION: "us-east-1"
-    #
-    # 2️⃣ Mount a credentials file (safer for prod)
-    # volumes:
-    #   - ~/.aws:/root/.aws:ro
-    #
-    # 3️⃣ Use the instance/EKS IAM role (preferred in cloud)
-    #   – no extra env‑vars needed; just ensure the role has
-    #   s3:PutObject permission on bucket citadel-audit.
-    #
-    networks:
-      - backend
-
-# -----------------------------------------------------------------
-# Secrets (Docker‑secret for DB password – you already have this)
-# -----------------------------------------------------------------
-secrets:
-  db_password:
-    external: true
-
-volumes:
-
-  # --------------------------------------------------------------
-  # 3️⃣  Prometheus – metrics collector
-  # --------------------------------------------------------------
-  monitor:
+# ----------------------------------------------------------------------
+#  3️⃣  PROMETHEUS (metrics collector)
+# ----------------------------------------------------------------------
+  prometheus:
     image: prom/prometheus:latest
     container_name: cqt-prometheus
     restart: unless-stopped
@@ -172,51 +126,133 @@ volumes:
       timeout: 5s
       retries: 3
 
-  # --------------------------------------------------------------
-  # 4️⃣  Node Exporter – system metrics (optional but handy)
-  # --------------------------------------------------------------
-  node_exporter:
-    image: prom/node-exporter:latest
-    container_name: cqt-node-exporter
-    restart: unless-stopped
-    pid: host
-    network_mode: host   # gives direct host metrics
-    depends_on:
-      - monitor
-
-  # --------------------------------------------------------------
-  # 5️⃣  Grafana – Mission‑Control UI
-  # --------------------------------------------------------------
-  grafana:
-    image: grafana/grafana:latest
-    container_name: cqt-grafana
+# ----------------------------------------------------------------------
+#  4️⃣  ALERTMANAGER (receives alerts from Prometheus)
+# ----------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: cqt-alertmanager
     restart: unless-stopped
     ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASS}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      - "9093:9093"
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana-provisioning:/etc/grafana/provisioning
+      - ./alertmanager.yml:/etc/alertmanager/config.yml:ro
     networks:
       - cqt-net
     depends_on:
-      - monitor
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
+      - prometheus
 
-  # --------------------------------------------------------------
-  # 6️⃣  Backup‑svc – tiny droplet (run on a separate VM, but we
-  #     keep the definition here for completeness; you will
-  #     `docker compose up -d backup` only on the backup VM.)
-  # --------------------------------------------------------------
+# ----------------------------------------------------------------------
+#  5️⃣  PUSHGATEWAY (optional – for short‑lived batch jobs)
+# ----------------------------------------------------------------------
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: cqt-pushgateway
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+    networks:
+      - cqt-net
+
+# ----------------------------------------------------------------------
+#  6️⃣  GRAFANA (private – full‑featured UI, auth required)
+# ----------------------------------------------------------------------
+  grafana-private:
+    image: grafana/grafana:latest
+    container_name: cqt-grafana-private
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: [.env]                     # contains GF_SECURITY_ADMIN_PASSWORD, etc.
+    secrets:
+      - GF_ADMIN_PASS
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - cqt-net
+    depends_on:
+      - prometheus
+
+# ----------------------------------------------------------------------
+#  7️⃣  GRAFANA (public – read‑only, anonymous access)
+# ----------------------------------------------------------------------
+  grafana-public:
+    image: grafana/grafana:latest
+    container_name: cqt-grafana-public
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - cqt-net
+
+# ----------------------------------------------------------------------
+#  8️⃣  NGINX REVERSE‑PROXY (TLS termination for public endpoints)
+# ----------------------------------------------------------------------
+  nginx-proxy:
+    image: nginx:alpine
+    container_name: cqt-nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "443:443"                         # public HTTPS
+    depends_on:
+      - grafana-public
+      - grafana-private
+      - admin-frontend
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro   # fullchain.pem + privkey.pem
+    networks:
+      - cqt-net
+
+# ----------------------------------------------------------------------
+#  9️⃣  ADMIN UI – FastAPI backend (exposes /api/*)
+# ----------------------------------------------------------------------
+  admin-backend:
+    build:
+      context: ./admin_ui/backend
+      dockerfile: Dockerfile
+    container_name: cqt-admin-backend
+    restart: unless-stopped
+    env_file: [.env]
+    secrets:
+      - CQT_API_TOKEN
+    ports:
+      - "8006:8000"                       # internal only; LB does not expose it
+    volumes:
+      - admin_backend:/app/static          # static files served by FastAPI
+    networks:
+      - cqt-net
+    depends_on:
+      - engine
+
+# ----------------------------------------------------------------------
+#  🔟  ADMIN UI – Vite SPA (built into `admin_backend` static dir)
+# ----------------------------------------------------------------------
+  admin-frontend:
+    build:
+      context: ./admin_ui/frontend
+      dockerfile: Dockerfile
+    container_name: cqt-admin-frontend
+    restart: unless-stopped
+    # In production the built assets are copied into `admin-backend` via the
+    # multi‑stage Dockerfile, so this service is only needed for local dev.
+    # It is kept here for completeness.
+    ports:
+      - "5173:5173"
+    networks:
+      - cqt-net
+
+# ----------------------------------------------------------------------
+#  1️⃣1️⃣  BACKUP SERVICE (snapshot + log archive)
+# ----------------------------------------------------------------------
   backup:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-backup:latest
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-backup:${IMAGE_TAG:-latest}
     container_name: cqt-backup
     restart: unless-stopped
     environment:
@@ -224,16 +260,147 @@ volumes:
       AWS_ACCESS_KEY_ID: ${DO_SPACES_KEY}
       AWS_SECRET_ACCESS_KEY: ${DO_SPACES_SECRET}
     volumes:
-      - pg_data:/srv/pg_data:ro          # read‑only mount of the DB volume
-      - /var/log:/srv/logs:ro            # host logs (will be tarred & uploaded)
+      - pg_data:/srv/pg_data:ro            # read‑only DB volume
+      - ./logs:/srv/logs:ro                # host logs (will be tarred & uploaded)
     networks:
       - cqt-net
-    # No public ports – the backup VM only talks outbound to DO API & Spaces.
-    # You will schedule the script via cron inside the container or on the host.
+    # No public ports – the container only talks outbound to DigitalOcean API / Spaces.
 
 # ----------------------------------------------------------------------
-# Docker Secrets – **external** (created on each engine droplet beforehand)
+#  1️⃣2️⃣  LOKI (log aggregation) + PROMTAIL (ship logs)
 # ----------------------------------------------------------------------
+  loki:
+    image: grafana/loki:2.9.5
+    container_name: cqt-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - cqt-net
+
+  promtail:
+    image: grafana/promtail:2.9.5
+    container_name: cqt-promtail
+    restart: unless-stopped
+    command: ["-config.file=/etc/promtail/promtail.yaml"]
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./promtail/promtail.yaml:/etc/promtail/promtail.yaml:ro
+    networks:
+      - cqt-net
+    depends_on:
+      - loki
+
+# ----------------------------------------------------------------------
+#  1️⃣3️⃣  OPENTELEMETRY COLLECTOR (OTLP ingestion)
+# ----------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.106.0
+    container_name: cqt-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4318:4318"   # OTLP HTTP receiver (used by the engine)
+    networks:
+      - cqt-net
+    depends_on:
+      - jaeger
+
+# ----------------------------------------------------------------------
+#  1️⃣4️⃣  JAEGER (distributed tracing)
+# ----------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: cqt-jaeger
+    environment:
+      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+    ports:
+      - "6831:6831/udp"   # UDP receiver (JaegerExporter)
+      - "16686:16686"     # UI
+    networks:
+      - cqt-net
+
+# ----------------------------------------------------------------------
+#  1️⃣5️⃣  SENTIMENT INGESTOR (optional side‑car)
+# ----------------------------------------------------------------------
+  sentiment:
+    build:
+      context: ./sentiment
+      dockerfile: Dockerfile
+    container_name: cqt-sentiment
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - redis
+    networks:
+      - cqt-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: cqt-redis
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - cqt-net
+    restart: unless-stopped
+
+# ----------------------------------------------------------------------
+#  1️⃣6️⃣  CORRELATION MATRIX EXPORTER (daily job)
+# ----------------------------------------------------------------------
+  correlation-exporter:
+    image: python:3.11-slim
+    container_name: cqt-corr-exporter
+    command: ["python", "/opt/cqt/src/correlation_exporter.py"]
+    volumes:
+      - ./src:/opt/cqt/src:ro
+      - ./config:/opt/cqt/config:ro
+    environment:
+      - DB_URL=${POSTGRES_URL}
+    depends_on:
+      - db
+    networks:
+      - cqt-net
+    restart: "no"   # run‑once via a host‑level cron or systemd timer
+
+# ----------------------------------------------------------------------
+#  1️⃣7️⃣  OPTIONAL: DAILY CALENDAR FETCH (systemd timer runs inside container)
+# ----------------------------------------------------------------------
+  calendar-fetch:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:${IMAGE_TAG:-latest}
+    container_name: cqt-calendar-fetch
+    entrypoint: ["/usr/local/bin/fetch_events.py"]
+    restart: "no"
+    depends_on:
+      - engine
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL}
+    networks:
+      - cqt-net
+
+# ----------------------------------------------------------------------
+#  1️⃣8️⃣  OPTIONAL: SHADOW‑MODE CONTROLLER (toggles shadow mode at runtime)
+# ----------------------------------------------------------------------
+  shadow-controller:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:${IMAGE_TAG:-latest}
+    container_name: cqt-shadow-ctl
+    command: ["python", "-c", "from utils.config_watcher import reload_config; reload_config()"]
+    restart: "no"
+    depends_on:
+      - engine
+    networks:
+      - cqt-net
+
+# ======================================================================
+#  SECRETS (created externally on each droplet)
+# ======================================================================
 secrets:
   POSTGRES_PASSWORD:
     external: true
@@ -245,1102 +412,9 @@ secrets:
     external: true
   IBKR_SECRET:
     external: true
-
-    # -------------------------------------------------
-# 7️⃣ Admin UI – FastAPI backend + React SPA
-# -------------------------------------------------
-admin-backend:
-  build:
-    context: ./admin_ui/backend
-    dockerfile: Dockerfile
-  container_name: citadel-admin-backend
-  environment:
-    # Secret for simple JWT (change in production!)
-    - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET:-CHANGE_ME}
-    # URL of the bot‑control service (the FastAPI wrapper we wrote)
-    - BOT_CONTROL_URL=http://bot-control:8000
-    # Prometheus endpoint (used by the draw‑down helper)
-    - PROMETHEUS_URL=http://prometheus:9090
-  depends_on:
-    - bot-control
-    - prometheus
-  networks:
-    - backend
-  restart: unless-stopped
-
-admin-frontend:
-  build:
-    context: ./admin_ui/frontend
-    dockerfile: Dockerfile
-  container_name: citadel-admin-frontend
-  depends_on:
-    - admin-backend
-  networks:
-    - backend
-  restart: unless-stopped
-  # The front‑end only serves static files, so we expose port 80 internally.
-  # The outer Nginx (or the WireGuard‑only host) will expose it to the world.
-  expose:
-    - "80"
-
-    admin-backend:
-  image: ghcr.io/yourorg/citadel-qt/admin-backend:latest
-  ...
-
-admin-frontend:
-  image: ghcr.io/yourorg/citadel-qt/admin-frontend:latest
-  ...
-
-
-    # -------------------------------------------------
-# 8️⃣ Nginx reverse‑proxy (TLS termination)
-# -------------------------------------------------
-nginx-proxy:
-  image: nginx:alpine
-  container_name: citadel-nginx
-  ports:
-    # Public HTTPS port – only this port is reachable from the Internet
-    - "443:443"
-  volumes:
-    - ./nginx/conf.d:/etc/nginx/conf.d:ro
-    - ./nginx/certs:/etc/nginx/certs:ro   # place your cert/key files here
-  depends_on:
-    - grafana-private
-    - grafana-public
-    - admin-frontend
-    - admin-backend
-  networks:
-    - backend
-  restart: unless-stopped
-
- citadel-bot:
-  ...
-  volumes:
-    - ./heatmaps:/tmp/heatmaps   # host folder ./heatmaps maps to container /tmp/heatmaps
-
-    citadel-bot:
-  # … existing config …
-  stop_grace_period: 30s          # give the app up to 30 s to finish
-  # (optional) expose the stop signal explicitly
-  # (Docker defaults to SIGTERM, but you can be explicit)
-  # stop_signal: SIGTERM
-
-  optimizer:
-  build: ./admin_ui/optimizer   # (or ./optimizer if you keep it separate)
-  container_name: citadel-optimizer
-  environment:
-    - OPT_WINDOW_DAYS=30
-  volumes:
-    - ./config:/app/config          # read/write the yaml files
-    - ./data:/app/data              # market data (parquet/CSV)
-    - ./optimizer/history:/opt/optimizer   # sqlite history DB
-  command: ["python", "run_opt.py"]
-  depends_on:
-    - citadel-db
-    - prometheus
-  restart: unless-stopped
-
- # -------------------------------------------------
-  # 10️⃣ Optimiser – runs the GA/Bayesian optimiser
-  # -------------------------------------------------
-  optimiser:
-    image: citadel/optimiser:latest
-    container_name: citadel-optimiser
-    environment:
-      # Path where the bot expects the config (shared volume)
-      - CONFIG_DIR=/app/config
-      # Optional: limit runtime (e.g., 2 h) to avoid runaway loops
-      - RUN_INTERVAL=86400   # seconds (24 h). Set to 0 for “run once then exit”.
-    volumes:
-      - ./config:/app/config:rw   # shared with the bot – writable
-    depends_on:
-      - citadel-bot   # ensures the bot is up (optimiser can read metrics)
-    networks:
-      - backend
-    restart: unless-stopped
-
-    # -------------------------------------------------
-# Optimiser – runs the GA (or CMA‑ES) on schedule
-# -------------------------------------------------
-optimiser:
-  image: citadel/optimiser:latest
-  container_name: citadel-optimiser
-  environment:
-    - TRAIN_DATA=/data/train.parquet
-    - VAL_DATA=/data/val.parquet
-    - OUT_CONFIG=/opt/config/new_config.yaml
-    - RUN_INTERVAL=86400          # seconds between runs (24 h). Set 0 for one‑off.
-  volumes:
-    - ./data:/data:ro               # historic data (read‑only)
-    - ./config:/opt/config:rw        # shared with the bot (hot‑reload)
-  depends_on:
-    - citadel-bot                   # ensures DB & broker are up
-  networks:
-    - backend
-  restart: unless-stopped
-
-  CMD ["sh", "-c", "while true; do python run_opt.py; sleep ${RUN_INTERVAL:-86400}; done"]
-
-services:
-  pushgateway:
-    image: prom/pushgateway:latest
-    ports:
-      - "9091:9091"
-    restart: unless-stopped
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
-
-  alertmanager:
-    image: prom/alertmanager:latest
-    volumes:
-      - ./alertmanager.yml:/etc/alertmanager/config.yml
-    ports:
-      - "9093:9093"
-
-alertmanager:
-  image: prom/alertmanager:latest
-  volumes:
-    - ./alertmanager.yml:/etc/alertmanager/config.yml:ro
-    - ./alertmanager_secrets:/etc/alertmanager/secrets:ro   # <-- new
-  environment:
-    - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
-
-     global-risk-controller:
-    build:
-      context: ./admin_ui/global_risk_controller
-      dockerfile: Dockerfile
-    container_name: citadel-global-risk
-    environment:
-      - DB_URI=postgresql://citadel:${POSTGRES_PASSWORD}@citadel-db:5432/citadel
-      - MAX_GLOBAL_RISK=0.05
-    depends_on:
-      - citadel-db
-    networks:
-      - backend
-    restart: unless-stopped
-
- # -------------------------------------------------
-  # 9️⃣ Global Risk‑Budget Controller
-  # -------------------------------------------------
-  global-risk-controller:
-    build:
-      context: ./admin_ui/global_risk_controller
-      dockerfile: Dockerfile
-    container_name: citadel-global-risk
-    environment:
-      - DB_URI=postgresql://citadel:${POSTGRES_PASSWORD}@citadel-db:5432/citadel
-      - MAX_GLOBAL_RISK=0.05
-    depends_on:
-      - citadel-db
-    networks:
-      - backend
-    restart: unless-stopped
-
-  # -------------------------------------------------
-  # 10️⃣ Edge‑Decay Detector (runs as side‑car)
-  # -------------------------------------------------
-  edge-decay-detector:
-    build:
-      context: ./admin_ui/edge_decay_detector
-      dockerfile: Dockerfile
-    container_name: citadel-edge-decay
-    environment:
-      - DB_URI=postgresql://citadel:${POSTGRES_PASSWORD}@citadel-db:5432/citadel
-      - PROMETHEUS_URL=http://prometheus:9090
-    depends_on:
-      - citadel-db
-      - prometheus
-    networks:
-      - backend
-    restart: unless-stopped
-
-        # -------------------------------------------------
-    # Falco – runtime IDS (Docker side‑car)
-    # -------------------------------------------------
-    falco:
-      image: falco/falco:latest
-      container_name: citadel-falco
-      privileged: true                         # required for kernel event capture
-      network_mode: "host"                     # Falco needs host networking to see all syscalls
-      pid: "host"                              # share the host PID namespace
-      volumes:
-        - /var/run/docker.sock:/host/var/run/docker.sock:ro   # read Docker events
-        - /dev:/host/dev:ro                                 # needed for /proc access
-        - /proc:/host/proc:ro                               # needed for /proc access
-        - /boot:/host/boot:ro                               # needed for kernel headers
-        - /lib/modules:/host/lib/modules:ro                 # needed for kernel modules
-        - ./falco/rules/falco_rules.local.yaml:/etc/falco/falco_rules.local.yaml:ro
-      environment:
-        - FALCO_RULES_FILE=/etc/falco/falco_rules.local.yaml
-        - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}   # set in .env (see below)
-      command: >
-        /usr/bin/falco
-        -K /host
-        -r /etc/falco/falco_rules.yaml
-        -r /etc/falco/falco_rules.local.yaml
-        -o json_output=true
-        -o json_include_output_property=true
-        -o json_include_tags_property=true
-        -o json_include_rule_property=true
-        -o json_include_source_property=true
-        -o json_include_time_property=true
-        -o json_include_priority_property=true
-
-# -------------------------------------------------
-# Networks (if you need an isolated network for the stack)
-# -------------------------------------------------
-networks:
-  cqt-net:
-    driver: bridge
-
-# -------------------------------------------------
-# Volumes (persistent storage for services that need it)
-# -------------------------------------------------
-volumes:
-  pg_data: {}
-  prometheus_data: {}
-  grafana_data: {}
-  # Add any additional named volumes you require here
-
-  citadel-bot:
-  image: citadel/trader:latest
-  depends_on:
-    - citadel-db
-  environment:
-    - BUCKET_ID=${BUCKET_ID:-1}
-    - VAULT_ADDR=https://vault.example.com
-    - VAULT_ROLE=citadel-app
-  ports:
-    - "8000"                 # health / metrics endpoint (internal only)
-  restart: unless-stopped    # <‑‑ THIS IS THE KEY line
-
-Add the new service definition (replace the placeholder you already have, or insert if missing):
- bot-control:
-    build:
-      context: ./admin_ui/bot_control
-      dockerfile: Dockerfile
-    container_name: citadel-bot-control
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - CONTROL_API_KEY=${CONTROL_API_KEY:-CHANGE_ME}
-    depends_on:
-      - redis          # make sure you have a redis container in the stack
-    networks:
-      - backend
-    restart: unless-stopped
-
-    services:
-  # … existing citadel‑bot, prometheus, grafana, vault …
-
-  dd_monitor:
-    image: citadel/dd-monitor:latest   # you can build it locally from src/dd_monitor.py
-    environment:
-      - VAULT_ADDR=http://vault:8200
-      - CONFIG_PATH=/etc/citadel/config.yaml
-    volumes:
-      - ./config:/etc/citadel:ro
-    depends_on:
-      - citadel-db
-      - vault
-    # Run every hour via a simple cron inside the container
-    command: ["sh", "-c", "while true; do python /app/dd_monitor.py; sleep 3600; done"]
-citadel-bot-1:
-  image: citadel/trader:latest
-  environment:
-    - BUCKET_ID=1
-    - USE_RISK_SCHEDULE=true          # <-- normal bucket (uses schedule)
-  ...
-
-citadel-bot-control:
-  image: citadel/trader:latest
-  environment:
-    - BUCKET_ID=99
-    - USE_RISK_SCHEDULE=false         # <-- control bucket (constant 0.5 %)
-  ...
-# -------------------------------------------------
-# 10️⃣ Loki – log aggregation & long‑term storage
-# -------------------------------------------------
-loki:
-  image: grafana/loki:2.9.5   # pick the latest stable tag
-  container_name: citadel-loki
-  command: -config.file=/etc/loki/local-config.yaml
-  volumes:
-    - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
-    - loki-data:/var/lib/loki   # persistent volume (host‑backed)
-  restart: unless-stopped
-  networks:
-    - backend
-volumes:
-  pgdata:
-  grafana_data:
-  loki-data:          # <-- new
-# -------------------------------------------------
-# 11️⃣ Loki → S3 Exporter (run nightly)
-# -------------------------------------------------
-loki-exporter:
-  image: amazon/aws-cli:2.15.31   # official AWS CLI image
-  container_name: citadel-loki-exporter
-  entrypoint: ["/opt/citadel/scripts/export_logs.sh"]
-  volumes:
-    - loki-data:/var/lib/loki:ro   # read‑only mount of Loki data
-    - ./scripts:/opt/citadel/scripts:ro
-  environment:
-    - AWS_DEFAULT_REGION=eu-west-1   # change to your region
-    # If you use instance‑profile IAM role, you don’t need keys.
-    # Otherwise, inject them via Docker secrets or env vars:
-    # - AWS_ACCESS_KEY_ID=xxxx
-    # - AWS_SECRET_ACCESS_KEY=yyyy
-  networks:
-    - backend
-  restart: "no"   # do NOT restart automatically
-
-services:
-  engine:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:${IMAGE_TAG:-latest}
-    # … the rest of your definition …
- services:
-  citadel-bot:
-    environment:
-      BROKER_TYPE: "binance_futures"
-      VAULT_SECRET_PATH: "secret/data/citadel/live_binance_futures"
-      USE_OPTIMISED_CFG: "true"
-version: "3.9"
-services:
-  # -------------------------------------------------
-  # Existing services (vault, citadel‑bot, prometheus, grafana, etc.)
-  # -------------------------------------------------
-
-  # -------------------------------------------------
-  # OpenTelemetry Collector (OTel Contrib)
-  # -------------------------------------------------
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.106.0
-    command: ["--config=/etc/otel-collector-config.yaml"]
-    volumes:
-      - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
-    ports:
-      - "4318:4318"   # OTLP HTTP receiver (used by the bot)
-    depends_on:
-      - jaeger
-
-  # -------------------------------------------------
-  # Jaeger (all‑in‑one for dev)
-  # -------------------------------------------------
-  jaeger:
-    image: jaegertracing/all-in-one:1.53
-    ports:
-      - "16686:16686"   # UI
-      - "14268:14268"   # HTTP collector (optional)
-    environment:
-      COLLECTOR_ZIPKIN_HTTP_PORT: 9411
-
- correlation-exporter:
-    image: python:3.11-slim
-    volumes:
-      - ./src:/opt/cqt/src:ro
-    command: ["python", "/opt/cqt/src/correlation_exporter.py"]
-    depends_on:
-      - citadel-db
-    restart: unless-stopped
-
-    services:
-  # -------------------------------------------------
-  # PostgreSQL (single instance, two schemas)
-  # -------------------------------------------------
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: citadel
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: citadel
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports: ["5432:5432"]
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "citadel"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  # -------------------------------------------------
-  # Shared market‑feed writer (writes to a named pipe)
-  # -------------------------------------------------
-  feed:
-    image: citadel/trader:stable   # same image, we just run a different entrypoint
-    command: >
-      sh -c "mkfifo -m 666 /tmp/mt5_pipe &&
-             python /opt/citadel/feed_writer.py --pipe /tmp/mt5_pipe"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - pipe:/tmp   # shared volume for the FIFO
-
-  # -------------------------------------------------
-  # Control bot (baseline – e.g., no LIR)
-  # -------------------------------------------------
-  citadel-bot-ctrl:
-    image: citadel/trader:stable
-    environment:
-      EXPERIMENT: "BASELINE"
-      DB_SCHEMA: "public"
-      PIPE_PATH: "/tmp/mt5_pipe"
-    depends_on:
-      - feed
-    volumes:
-      - pipe:/tmp
-    command: >
-      sh -c "python /opt/citadel/main.py"
-
-  # -------------------------------------------------
-  # Variant bot (e.g., WITH_LIR)
-  # -------------------------------------------------
-  citadel-bot-exp:
-    image: citadel/trader:stable
-    environment:
-      EXPERIMENT: "WITH_LIR"
-      DB_SCHEMA: "exp"
-      PIPE_PATH: "/tmp/mt5_pipe"
-    depends_on:
-      - feed
-    volumes:
-      - pipe:/tmp
-    command: >
-      sh -c "python /opt/citadel/main.py"
-
-volumes:
-  pgdata:
-  pipe:
-
-# -------------------------------------------------
-#  nginx‑proxy – TLS termination for public Grafana &
-#  Prometheus endpoints (exposed on port 443)
-# -------------------------------------------------
-nginx-proxy:
-  image: nginx:alpine
-  container_name: citadel-nginx-proxy
-  restart: unless-stopped
-  ports:
-    - "443:443"                 # public HTTPS
-  depends_on:
-    - grafana-public            # the anonymous Grafana instance
-    - prometheus
-  volumes:
-    - ./nginx/conf.d:/etc/nginx/conf.d:ro   # our config files
-    - ./certs:/etc/nginx/certs:ro           # TLS certs (fullchain.pem + privkey.pem)
-  networks:
-    - backend
-
-services:
-  # -------------------------------------------------
-  # Existing services (PostgreSQL, Prometheus, Grafana, Bot, etc.)
-  # -------------------------------------------------
-  citadel-db:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: citadel
-      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
-      POSTGRES_DB: citadel
-    secrets:
-      - db_password
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - backend
-
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    restart: unless-stopped
-    networks:
-      - backend
-
-  grafana-private:
-    image: grafana/grafana:latest
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana_admin_pwd
-    secrets:
-      - grafana_admin_pwd
-    volumes:
-      - grafana_private_data:/var/lib/grafana
-      - ./dashboards:/var/lib/grafana/dashboards
-    restart: unless-stopped
-    networks:
-      - backend
-
-  grafana-public:
-    image: grafana/grafana:latest
-    environment:
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-    volumes:
-      - grafana_public_data:/var/lib/grafana
-    restart: unless-stopped
-    networks:
-      - backend
-
-  citadel-bot:
-    image: citadel/trader:latest
-    depends_on:
-      - citadel-db
-    environment:
-      - BUCKET_ID=1
-      - VAULT_ADDR=https://vault.example.com
-      - VAULT_ROLE=citadel-app
-    ports:
-      - "8000"   # health / metrics (internal only)
-    restart: unless-stopped
-    networks:
-      - backend
-
-  bot-control:
-    image: ghcr.io/yourorg/citadel-qt/bot-control:latest
-    environment:
-      - CONTROL_API_KEY=${CONTROL_API_KEY}
-    ports:
-      - "8001:8000"
-    networks:
-      - backend
-    restart: unless-stopped
-
-  # -------------------------------------------------
-  # 7️⃣ Admin UI – FastAPI backend
-  # -------------------------------------------------
-  admin-backend:
-    image: ghcr.io/yourorg/citadel-qt/admin-backend:latest
-    environment:
-      - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET}
-      - BOT_CONTROL_URL=http://bot-control:8000
-      - PROMETHEUS_URL=http://prometheus:9090
-    depends_on:
-      - bot-control
-      - prometheus
-    networks:
-      - backend
-    restart: unless-stopped
-
-  # -------------------------------------------------
-  # 8️⃣ Admin UI – React front‑end
-  # -------------------------------------------------
-  admin-frontend:
-    image: ghcr.io/yourorg/citadel-qt/admin-frontend:latest
-    depends_on:
-      - admin-backend
-    expose:
-      - "80"
-    networks:
-      - backend
-    restart: unless-stopped
-
-  # -------------------------------------------------
-  # 9️⃣ Nginx reverse‑proxy (TLS termination)
-  # -------------------------------------------------
-  nginx-proxy:
-    image: nginx:alpine
-    container_name: citadel-nginx-proxy
-    ports:
-      - "443:443"
-    depends_on:
-      - grafana-public
-      - prometheus
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./certs:/etc/nginx/certs:ro
-    networks:
-      - backend
-    restart: unless-stopped
-
-networks:
-  backend:
-    driver: bridge
-
-volumes:
-  pgdata:
-  grafana_private_data:
-  grafana_public_data:
-
-# -------------------------------------------------
-# 7️⃣ Loki – log storage
-# -------------------------------------------------
-loki:
-  image: grafana/loki:2.9.1
-  container_name: citadel-loki
-  command: -config.file=/etc/loki/local-config.yaml
-  ports:
-    - "3100:3100"          # only needed for Grafana; not exposed to the Internet
-  volumes:
-    - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
-    - loki-data:/loki        # persistent storage for log chunks
-  restart: unless-stopped
-  networks:
-    - backend
-
-# -------------------------------------------------
-# 8️⃣ Promtail – log collector
-# -------------------------------------------------
-promtail:
-  image: grafana/promtail:2.9.1
-  container_name: citadel-promtail
-  command: -config.file=/etc/promtail/promtail.yaml
-  volumes:
-    - /var/log:/var/log:ro                 # host logs (Docker host + containers)
-    - ./promtail/promtail.yaml:/etc/promtail/promtail.yaml:ro
-    - /var/lib/docker/containers:/var/lib/docker/containers:ro   # needed for container logs
-    - /run/docker.sock:/run/docker.sock:ro                     # optional, for Docker API
-  restart: unless-stopped
-  networks:
-    - backend
-
-services:
-  # -------------------------------------------------
-  # Existing services (PostgreSQL, Prometheus, Grafana, Bot, etc.)
-  # -------------------------------------------------
-  citadel-db:
-    image: postgres:15
-    # … (unchanged)
-
-  prometheus:
-    image: prom/prometheus:latest
-    # … (unchanged)
-
-  grafana-private:
-    image: grafana/grafana:latest
-    # … (unchanged)
-
-  grafana-public:
-    image: grafana/grafana:latest
-    # … (unchanged)
-
-  citadel-bot:
-    image: citadel/trader:latest
-    labels:
-      - "citadel=true"          # <-- Promtail filter
-    # … (unchanged)
-
-  bot-control:
-    image: ghcr.io/yourorg/citadel-qt/bot-control:latest
-    # … (unchanged)
-
-  # -------------------------------------------------
-  # 7️⃣ Loki – log storage
-  # -------------------------------------------------
-  loki:
-    image: grafana/loki:2.9.1
-    container_name: citadel-loki
-    command: -config.file=/etc/loki/local-config.yaml
-    ports:
-      - "3100:3100"
-    volumes:
-      - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
-      - loki-data:/loki
-    restart: unless-stopped
-    networks:
-      - backend
-
-  # -------------------------------------------------
-  # 8️⃣ Promtail – log collector
-  # -------------------------------------------------
-  promtail:
-    image: grafana/promtail:2.9.1
-    container_name: citadel-promtail
-    command: -config.file=/etc/promtail/promtail.yaml
-    volumes:
-      - /var/log:/var/log:ro
-      - ./promtail/prom
-
-      alertmanager:
-  image: prom/alertmanager:latest
-  container_name: alertmanager
-  volumes:
-    - ./monitoring/alertmanager.yml:/etc/alertmanager/config.yml:ro
-  command:
-    - '--config.file=/etc/alertmanager/config.yml'
-    - '--storage.path=/alertmanager'
-  ports:
-    - "9093:9093"
-  restart: unless-stopped
-  networks:
-    - backend
-
-# -------------------------------------------------
-# 10️⃣ Jaeger – distributed tracing backend
-# -------------------------------------------------
-jaeger:
-  image: jaegertracing/all-in-one:1.53
-  container_name: citadel-jaeger
-  environment:
-    COLLECTOR_ZIPKIN_HTTP_PORT: 9411   # optional Zipkin compatibility
-  ports:
-    - "6831:6831/udp"   # UDP port used by the JaegerExporter (default)
-    - "16686:16686"     # Jaeger UI
-  networks:
-    - backend
-  restart: unless-stopped
-
-otel-collector:
-  image: otel/opentelemetry-collector:0.103.0
-  container_name: citadel-otel-collector
-  command: ["--config=/etc/otel-collector-config.yaml"]
-  volumes:
-    - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
-  ports:
-    - "9464:9464"   # Prometheus metrics endpoint
-  depends_on:
-    - jaeger
-  networks:
-    - backend
-  restart: unless-stopped
-
-  # -------------------------------------------------
-# 10️⃣ Jaeger – all‑in‑one (UI + collector)
-# -------------------------------------------------
-jaeger:
-  image: jaegertracing/all-in-one:1.53
-  container_name: citadel-jaeger
-  environment:
-    COLLECTOR_ZIPKIN_HTTP_PORT: 9411   # optional Zipkin compatibility
-  ports:
-    - "6831:6831/udp"   # UDP collector (used by JaegerExporter)
-    - "16686:16686"     # Jaeger UI
-  networks:
-    - backend
-  restart: unless-stopped
-
-  # docker-compose.yml (add a new service)
-services:
-  data-ingest:
-    image: citadel/trader:latest   # same image that contains the code
-    command: ["cqt-ingest"]
-    environment:
-      - MT5_LOGIN=${MT5_LOGIN}          # injected via Vault Agent as before
-      - MT5_PASSWORD=${MT5_PASSWORD}
-    depends_on:
-      - vault
-    restart: "no"                         # run‑once per day
-    deploy:
-      restart_policy:
-        condition: none
-
-services:
-  # -----------------------------------------------------------------
-  # 1️⃣  Bot container – use the same image, just point it at the demo secret
-  # -----------------------------------------------------------------
-  citadel-bot:
-    image: citadel/trader:latest                # built from your Dockerfile
-    environment:
-      # Tell the bot to read the demo secret instead of the prod one
-      VAULT_SECRET_PATH: "secret/data/citadel/demo_mt5"
-      # Enable the flag that disables any real‑money side‑effects
-      PAPER_MODE: "true"
-    volumes:
-      - ./vault/agent.hcl:/etc/vault/agent.hcl:ro
-      - vault-secrets:/run/secrets
-    # Keep the same entrypoint that starts the Vault side‑car and the bot
-    entrypoint: ["/bin/sh","-c","\
-      vault agent -config=/etc/vault/agent.hcl -exit-after-auth \
-      && python src/main.py"]
-    networks:
-      - internal
-
-  # -----------------------------------------------------------------
-  # 2️⃣  (Optional) Separate PostgreSQL schema for paper‑trading
-  # -----------------------------------------------------------------
-  # If you want to keep paper trades completely isolated, uncomment
-  # the block below and adjust the DB URL in your bot config.
-  #
-  # citadel-db-paper:
-  #   image: postgres:15
-  #   environment:
-  #     POSTGRES_USER: citadel
-  #     POSTGRES_PASSWORD: paper_secret
-  #     POSTGRES_DB: citadel_paper
-  #   volumes:
-  #     - pgdata-paper:/var/lib/postgresql/data
-  #   networks:
-  #     - internal
-
-networks:
-  internal:
-    driver: bridge
-
-volumes:
-  vault-secrets:
-  # pgdata-paper:   # uncomment if you enable the paper DB
-
-  services:
-  citadel-bot:
-    image: citadel/trader:latest
-    environment:
-      # Use the *live* secret (real credentials) but enable shadow mode
-      VAULT_SECRET_PATH: "secret/data/citadel/live_mt5"   # or live_ibkr
-      SHADOW_MODE: "true"
-    volumes:
-      - ./vault/agent.hcl:/etc/vault/agent.hcl:ro
-      - vault-secrets:/run/secrets
-      - ./logs:/var/log/cqt   # expose the shadow.log to the host
-    entrypoint: ["/bin/sh","-c","\
-      vault agent -config=/etc/vault/agent.hcl -exit-after-auth \
-      && python src/main.py"]
-    networks:
-      - internal
-
-# (Optional) keep the same monitoring stack – Prometheus will scrape the
-# new `shadow` labelled metrics automatically.
-networks:
-  internal:
-    driver: bridge
-
-volumes:
-  vault-secrets:
-  logs:   # persists the shadow.log for later analysis
-
-# docker‑compose.yml (excerpt)
-services:
-  pushgateway:
-    image: prom/pushgateway:latest
-    ports:
-      - "9091:9091"
-    restart: unless-stopped
-
-     backup-exporter:
-    image: python:3.11-slim
-    container_name: citadel-backup-exporter
-    command: ["python", "/opt/backup/backup_exporter.py"]
-    volumes:
-      - backup-scripts:/opt/backup:ro
-    ports:
-      - "9110:9110"
-    networks:
-      - citadel-net
-
- # -------------------------------------------------
-  # Existing services (vault, citadel‑bot, …)
-  # -------------------------------------------------
-
-  # -------------------------------------------------
-  # New Sentiment Ingestor
-  # -------------------------------------------------
-  sentiment:
-    build: ./sentiment          # Dockerfile we created earlier
-    restart: unless-stopped
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
-    depends_on:
-      - redis
-    networks:
-      - backend
-
-citadel-bot:
-  # … existing config …
-  stop_grace_period: 30s          # give the app up to 30 s to finish
-  # (optional) expose the stop signal explicitly
-  # (Docker defaults to SIGTERM, but you can be explicit)
-  # stop_signal: SIGTERM
-
-citadel-bot:
-  # …
-  volumes:
-    - bot_state:/var/lib/citadel/state   # persistent volume
-  # …
-volumes:
-  bot_state:
-
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
-    volumes:
-      - redis-data:/data
-    networks:
-      - backend
-    restart: unless-stopped
-volumes:
-  redis-data:
-# docker‑compose.yml addition
-ledger-snapshot:
-  image: python:3.11-slim
-  container_name: citadel-ledger-snapshot
-  working_dir: /app
-  volumes:
-    - ./src:/app/src
-    - ./config:/app/config
-  environment:
-    - AWS_DEFAULT_REGION=us-east-1
-    - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-    - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-  command: >
-    /bin/sh -c "while true; do
-      python -m src.trade_logger push_root_to_s3;
-      sleep 3600;
-    done"
-  networks:
-    - backend
-  restart: unless-stopped
-
- ledger-snapshot-exporter:
-    build:
-      context: ./admin_ui/backend          # reuse the same Dockerfile (Python)
-      dockerfile: Dockerfile
-    container_name: citadel-ledger-exporter
-    command: ["python", "-m", "src.ledger_snapshot_exporter"]
-    environment:
-      - LEDGER_S3_BUCKET=${LEDGER_S3_BUCKET}
-      - KMS_SIGNING_KEY_ARN=${KMS_SIGNING_KEY_ARN}
-      - AWS_DEFAULT_REGION=us-east-1
-    networks:
-      - backend
-    restart: unless-stopped
-
-admin-backend:
-  environment:
-    - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET}
-    - BOT_CONTROL_URL=http://bot-control:8000
-    - PROMETHEUS_URL=http://prometheus:9090
-    - SLACK_WEBHOOK=https://hooks.slack.com/services/XXX/YYY/ZZZ
-    - SLACK_VERIFICATION_TOKEN=${SLACK_VERIFICATION_TOKEN}
-    - JIRA_BASE_URL=${JIRA_BASE_URL}
-    - JIRA_USER_EMAIL=${JIRA_USER_EMAIL}
-    - JIRA_API_TOKEN=${JIRA_API_TOKEN}
-    - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY}
-    - RARE_EVENT_S3_BUCKET=${RARE_EVENT_S3_BUCKET}
-
-citadel-bot:
-  ...
-  secrets:
-    - citadel_config
-  volumes:
-    - /run/secrets/citadel_config:/app/config/config.yaml:ro
-
-
-    services:
-  citadel-bot:
-    image: citadel/trader:${BOT_IMAGE_TAG:-latest}
-    ...
-
-
-citadel-bot:
-  environment:
-    - LUMO_ENV=demo   # forces the bot to use the demo broker endpoints
-
-environment:
-  - BROKER_MODE=demo          # your bot should read this and pick the right secret
-
-  environment:
-  - SHADOW_MODE=${SHADOW_MODE:-false}
-
-rollback-watcher:
-    build:
-      context: ./watcher
-      dockerfile: Dockerfile
-    volumes:
-      - ./shared/config:/opt/config
-    depends_on:
-      - prometheus
-    networks:
-      - backend
-    restart: unless-stopped
-
-citadel-db:
-  build:
-    context: ./admin_ui/backend   # folder that contains the Dockerfile above
-    dockerfile: Dockerfile
-  # … rest of the service definition stays the same …
-
-# ------------------------------------------------------------
-# docker-compose.yml – add a one‑off “calendar‑fetch” service
-# ------------------------------------------------------------
-services:
-  # … existing engine / api services …
-
-  calendar-fetch:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:${IMAGE_TAG:-latest}
-    container_name: cqt-calendar-fetch
-    entrypoint: ["/usr/local/bin/fetch_events.py"]
-    restart: "no"                     # run once, then exit
-    depends_on:
-      - api                          # ensure the DB is up
-    environment:
-      - POSTGRES_URL=${POSTGRES_URL}  # passed via .env or Docker secret
-    # Optional: run only at a specific time using a host‑level cron that
-    # does `docker compose run --rm calendar-fetch`.  Systemd timer is
-    # generally simpler.
-
-jaeger:
-  image: jaegertracing/all-in-one:1.53   # replace with the “Cassandra” variant
-  environment:
-    SPAN_STORAGE_TYPE: cassandra
-    CASSANDRA_SERVERS: cassandra
-    CASSANDRA_KEYSPACE: jaeger_v1
-  ports:
-    - "16686:16686"
-    - "14268:14268"
-  depends_on:
-    - cassandra
-
-cassandra:
-  image: cassandra:4.1
-  environment:
-    - MAX_HEAP_SIZE=512M
-    - HEAP_NEWSIZE=128M
-  volumes:
-    - cassandra-data:/var/lib/cassandra
-  ports:
-    - "9042:9042"
-
-volumes:
-  cassandra-data:
-
-# -------------------------------------------------
-# Loki (log aggregation)
-# -------------------------------------------------
-loki:
-  image: grafana/loki:2.9.5
-  command: -config.file=/etc/loki/local-config.yaml
-  volumes:
-    - ./loki/local-config.yaml:/etc/loki/local-config.yaml:ro
-  ports:
-    - "3100:3100"
-
-# -------------------------------------------------
-# Promtail (ships container logs to Loki)
-# -------------------------------------------------
-promtail:
-  image: grafana/promtail:2.9.5
-  volumes:
-    - /var/log:/var/log
-    - /var/lib/docker/containers:/var/lib/docker/containers:ro
-    - ./promtail/config.yaml:/etc/promtail/config.yaml:ro
-  command: -config.file=/etc/promtail/config.yaml
-
-# -------------------------------------------------
-# Tempo (trace storage)
-# -------------------------------------------------
-tempo:
-  image: grafana/tempo:2.5.0
-  command: -config.file=/etc/tempo/tempo.yaml
-  volumes:
-    - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
-  ports:
-    - "3200:3200"   # OTLP ingest (grpc)
-    - "4318:4318"   # OTLP ingest (http)
-
-
-citadel-bot:
-  image: citadel/trader:latest
-  # …
-  labels:
-    - "citadel=true"
-
-bot-control:
-  # …
-  labels:
-    - "citadel=true"
-
+  GF_ADMIN_PASS:
+    external: true
+
+# ======================================================================
+#  END OF FILE
+# ======================================================================
