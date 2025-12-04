@@ -1,0 +1,27 @@
+name: Build Regime Bank
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run training
+        env:
+          DATA_PATH: data/
+        run: python scripts/build_regime_bank.py
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: regime-bank
+          path: artifacts/regime_bank_*.json
