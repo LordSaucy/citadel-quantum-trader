@@ -356,4 +356,7 @@ optimiser:
     depth: 0.05
     # … other weights …
 
+git add config.yaml
+git commit -m "Tune LIR: weight=0.18, min_abs=0.35, depth_min_units=18000"
+git push origin main
 
