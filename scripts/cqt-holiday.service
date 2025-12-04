@@ -1,0 +1,9 @@
+[Unit]
+Description=CQT Holiday Silence Generator
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec cqt-api /usr/local/bin/create_holiday_silences.sh
+# If you placed the script in the engine container, replace cqt-api with cqt-engine
