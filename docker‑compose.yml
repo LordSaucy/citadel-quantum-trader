@@ -1254,4 +1254,21 @@ citadel-db:
     dockerfile: Dockerfile
   # … rest of the service definition stays the same …
 
+# ------------------------------------------------------------
+# docker-compose.yml – add a one‑off “calendar‑fetch” service
+# ------------------------------------------------------------
+services:
+  # … existing engine / api services …
 
+  calendar-fetch:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-engine:${IMAGE_TAG:-latest}
+    container_name: cqt-calendar-fetch
+    entrypoint: ["/usr/local/bin/fetch_events.py"]
+    restart: "no"                     # run once, then exit
+    depends_on:
+      - api                          # ensure the DB is up
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL}  # passed via .env or Docker secret
+    # Optional: run only at a specific time using a host‑level cron that
+    # does `docker compose run --rm calendar-fetch`.  Systemd timer is
+    # generally simpler.
