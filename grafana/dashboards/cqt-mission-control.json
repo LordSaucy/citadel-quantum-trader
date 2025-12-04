@@ -193,3 +193,34 @@
     }
   }
 }
+{
+  "type": "gauge",
+  "title": "Effective Leverage (bucket 1)",
+  "gridPos": { "x": 0, "y": 4, "w": 6, "h": 6 },
+  "targets": [
+    {
+      "refId": "C",
+      "expr": "effective_leverage{bucket_id=\"1\"}",
+      "legendFormat": ""
+    }
+  ],
+  "fieldConfig": {
+    "defaults": {
+      "min": 0,
+      "max": 100,
+      "thresholds": {
+        "mode": "absolute",
+        "steps": [
+          { "value": null, "color": "green" },   // ≤ 50 → green
+          { "value": 51,   "color": "orange" }, // 51‑80 → orange
+          { "value": 81,   "color": "red" }     // > 80 → red
+        ]
+      },
+      "unit": "short"
+    }
+  },
+  "options": {
+    "showThresholdLabels": true,
+    "showThresholdMarkers": true
+  }
+}
