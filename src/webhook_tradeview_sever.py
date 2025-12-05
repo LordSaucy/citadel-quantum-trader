@@ -182,7 +182,7 @@ def webhook():
     # ---- Store in history (keep last 100) ------------------------------
     signal_entry = {
         **data,
-        "received_at": datetime.utcnow().isoformat(),
+        "received_at": datetime.now().isoformat(),
         "ip": ip,
     }
     signal_history.append(signal_entry)
@@ -226,7 +226,7 @@ def status():
         {
             "status": "online",
             "trading_paused": TRADING_PAUSED,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "account": {
                 "balance": acct.balance if acct else 0,
                 "equity": acct.equity if acct else 0,
@@ -317,7 +317,7 @@ def health():
     return jsonify(
         {
             "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "version": "1.0.0",
         }
     ), 200
@@ -350,7 +350,7 @@ def _process_signal(data: Dict) -> None:
         if timestamp:
             try:
                 sig_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                age = (datetime.utcnow() - sig_time).total_seconds()
+                age = (datetime.now() - sig_time).total_seconds()
                 if age > 300:
                     logger.warning(f"Ignoring stale signal ({age:.0f}s old)")
                     return
