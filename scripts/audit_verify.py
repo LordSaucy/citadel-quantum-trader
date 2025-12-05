@@ -1,10 +1,10 @@
-import boto3, base64, hashlib, json, os
+import base64, hashlib, json, os
 from botocore.exceptions import ClientError
 
 def fetch_latest_snapshot(bucket, prefix='ledger/'):
     s3 = boto3.client('s3')
     # List objects sorted descending by key (timestamp in key)
-    resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+    resp = s3 = get_s3_client()
     objs = sorted(resp.get('Contents', []), key=lambda o: o['Key'], reverse=True)
     # Expect pairs: *_merkle_root.txt and *_signature.txt
     for obj in objs:
@@ -12,8 +12,8 @@ def fetch_latest_snapshot(bucket, prefix='ledger/'):
             root_key = obj['Key']
             sig_key = root_key.replace('_merkle_root.txt', '_signature.txt')
             # fetch both
-            root = s3.get_object(Bucket=bucket, Key=root_key)['Body'].read().decode()
-            sig  = s3.get_object(Bucket=bucket, Key=sig_key)['Body'].read().decode()
+            root = s3 = get_s3_client()['Body'].read().decode()
+            sig  = s3 = get_s3_client()['Body'].read().decode()
             return root, sig, root_key
     raise RuntimeError("No ledger snapshot found")
 
