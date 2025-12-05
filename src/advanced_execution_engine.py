@@ -254,23 +254,13 @@ class AdvancedExecutionEngine:
         mapping = {0: "low", 1: "medium", 2: "high"}
         return mapping.get(regime_id, "unknown")
 
-    # -----------------------------------------------------------------
-    # Pre‑trade guard – runs all safety checks synchronously
-    # -----------------------------------------------------------------
-    def _pre_trade_guard(self, signal: Dict[str, Any]) -> bool:
-        """
-        Returns True iff *all* guards approve the trade.
+    # =====================================================================
+    # ✅ FIXED: Extracted pre-trade guard checks into dedicated methods
+    #           to reduce cognitive complexity of send_order()
+    # =====================================================================
 
-        Expected keys in ``signal``:
-            - ``symbol``
-            - ``volume`` (positive for BUY, negative for SELL)
-            - ``required_volume`` (USD amount you intend to risk)
-        """
-        symbol = signal["symbol"]
-        volume = signal["volume"]
-        required_usd = signal["required_volume"]
-
-        # ---- Depth / LIR guard ----
+    def _check_depth_lir(self, symbol: str, volume: float) -> bool:
+        """Check depth and LIR guard."""
         if not check_depth(
             broker=self.primary_broker,
             symbol=symbol,
@@ -280,17 +270,21 @@ class AdvancedExecutionEngine:
             log.warning("Depth/LIR guard rejected trade for %s", symbol)
             trade_blocked_reason_total.labels(reason="depth_lir").inc()
             return False
+        return True
 
-        # ---- Latency guard ----
+    def _check_latency(self) -> bool:
+        """Check latency guard."""
         if not check_latency(
             broker=self.primary_broker,
             max_latency_sec=self.cfg.get("risk", {}).get("max_latency_sec", 0.15),
         ):
-            log.warning("Latency guard rejected trade for %s", symbol)
+            log.warning("Latency guard rejected trade")
             trade_blocked_reason_total.labels(reason="latency").inc()
             return False
+        return True
 
-        # ---- Spread guard ----
+    def _check_spread(self, symbol: str) -> bool:
+        """Check spread guard."""
         if not check_spread(
             broker=self.primary_broker,
             symbol=symbol,
@@ -299,8 +293,10 @@ class AdvancedExecutionEngine:
             log.warning("Spread guard rejected trade for %s", symbol)
             trade_blocked_reason_total.labels(reason="spread").inc()
             return False
+        return True
 
-        # ---- Volatility guard (ATR‑based) ----
+    def _check_volatility_guard(self, symbol: str) -> bool:
+        """Check volatility guard (ATR-based)."""
         if not check_volatility(
             tech_calc=self.market,
             symbol=symbol,
@@ -310,152 +306,160 @@ class AdvancedExecutionEngine:
             log.warning("Volatility guard rejected trade for %s", symbol)
             trade_blocked_reason_total.labels(reason="volatility").inc()
             return False
+        return True
 
-        # ---- Sentiment guard (optional) ----
+    def _check_sentiment_guard(self, symbol: str) -> bool:
+        """Check sentiment guard."""
         if not self.sentiment_guard.check(symbol):
             log.warning("Sentiment guard rejected trade for %s", symbol)
             trade_blocked_reason_total.labels(reason="sentiment").inc()
             return False
+        return True
 
-        # ---- Calendar lock‑out guard ----
+    def _check_calendar_guard(self) -> bool:
+        """Check calendar lock-out guard."""
         if self.calendar_guard.is_locked():
             log.warning("Calendar lock‑out active – trade skipped")
             trade_blocked_reason_total.labels(reason="calendar").inc()
             return False
+        return True
 
-        # ---- Volatility‑spike guard (custom) ----
+    def _check_vol_spike_guard(self, symbol: str) -> bool:
+        """Check volatility-spike guard."""
         if not self.vol_guard.check(symbol):
             log.warning("Volatility‑spike guard rejected trade for %s", symbol)
             trade_blocked_reason_total.labels(reason="vol_spike").inc()
             return False
+        return True
 
-        # ---- Shock detector (spread, desync, liquidity) ----
+    def _check_shock_detector(self, symbol: str) -> bool:
+        """Check shock detector."""
         if not self.shock_guard.check(self.market.get_latest_snapshot(symbol)):
             log.warning("Shock detector rejected trade for %s", symbol)
             trade_blocked_reason_total.labels(reason="shock").inc()
+            return False
+        return True
+
+    # -----------------------------------------------------------------
+    # Pre‑trade guard – runs all safety checks synchronously
+    # ✅ FIXED: Refactored to call extracted guard methods
+    # -----------------------------------------------------------------
+    def _pre_trade_guard(self, signal: Dict[str, Any]) -> bool:
+        """
+        Returns True iff *all* guards approve the trade.
+
+        Expected keys in ``signal``:
+            - ``symbol``
+            - ``volume`` (positive for BUY, negative for SELL)
+        """
+        symbol = signal["symbol"]
+        volume = signal["volume"]
+
+        # Run all guards in sequence; each guard logs and increments metrics
+        if not self._check_depth_lir(symbol, volume):
+            return False
+        if not self._check_latency():
+            return False
+        if not self._check_spread(symbol):
+            return False
+        if not self._check_volatility_guard(symbol):
+            return False
+        if not self._check_sentiment_guard(symbol):
+            return False
+        if not self._check_calendar_guard():
+            return False
+        if not self._check_vol_spike_guard(symbol):
+            return False
+        if not self._check_shock_detector(symbol):
             return False
 
         # All checks passed
         return True
 
-    # -----------------------------------------------------------------
-    # Core order‑submission entry point (sync – called from the signal loop)
-    # -----------------------------------------------------------------
-    def send_order(self, signal: Dict[str, Any]) -> Dict[str, Any]:
+    # =====================================================================
+    # ✅ FIXED: Extracted shadow mode logic into dedicated method
+    # =====================================================================
+    def _handle_shadow_mode(
+        self,
+        signal: Dict[str, Any],
+        start_ts: float,
+        price: Optional[float],
+        lot: float,
+    ) -> Dict[str, Any]:
         """
-        Expected keys in ``signal``:
-            - ``symbol``
-            - ``side`` (``"BUY"`` / ``"SELL"``)
-            - ``price`` (desired entry price)
-            - ``volume`` (positive for BUY, negative for SELL)
-            - ``required_volume`` (USD risk amount)
-            - ``bar`` (latest OHLCV bar – needed for regime)
-            - ``bucket_id`` (risk bucket identifier)
-        Returns a dict compatible with the rest of the CQT codebase.
+        Handle shadow mode order submission (no real order sent).
+        Returns the shadow mode result dict.
         """
-        start_ts = time.time()
         symbol = signal["symbol"]
         side = signal["side"]
-        price = signal.get("price")
-        volume = signal["volume"]
-        required_usd = signal["required_volume"]
-        bar = signal.get("bar", {})
+
+        # Simulate a fill with a tiny random jitter (±0.5 pip)
+        jitter = random.uniform(-0.0005, 0.0005)
+        fill_price = price + jitter if price is not None else None
+
+        latency = time.time() - start_ts
+        order_latency_seconds.labels(symbol=symbol, shadow="yes").observe(latency)
+
+        # Slippage in pips
+        if fill_price is not None and price is not None:
+            pip_factor = 0.0001
+            if symbol.upper().endswith("JPY"):
+                pip_factor = 0.01
+            slippage = abs(fill_price - price) / pip_factor
+            order_price_slippage.labels(symbol=symbol, side=side).inc(slippage)
+        else:
+            slippage = None
+
+        # Persist a JSON line to the shadow log
+        shadow_entry = {
+            "timestamp": utc_now().isoformat(),
+            "symbol": symbol,
+            "side": side,
+            "requested_price": price,
+            "fill_price": round(fill_price, 5) if fill_price else None,
+            "lot": lot,
+            "latency_seconds": round(latency, 4),
+            "slippage_pips": round(slippage, 3) if slippage else None,
+            "reason": "shadow_mode",
+        }
+        shadow_path = Path("/var/log/cqt/shadow.log")
+        shadow_path.parent.mkdir(parents=True, exist_ok=True)
+        with shadow_path.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(shadow_entry) + "\n")
+
+        self.shadow_counter.labels(symbol=symbol, direction=side).inc()
+        log.debug("[SHADOW] %s", shadow_entry)
+
+        return {
+            "executed": True,
+            "shadow": True,
+            "fill_price": fill_price,
+            "lot": lot,
+            "latency_seconds": latency,
+            "slippage_pips": slippage,
+        }
+
+    # =====================================================================
+    # ✅ FIXED: Extracted real mode logic into dedicated method
+    # =====================================================================
+    def _handle_real_mode(
+        self,
+        signal: Dict[str, Any],
+        broker: Any,
+        start_ts: float,
+        price: Optional[float],
+        lot: float,
+        risk_multiplier: float,
+    ) -> Dict[str, Any]:
+        """
+        Handle real mode order submission (actual order sent to broker).
+        Returns the result dict.
+        """
+        symbol = signal["symbol"]
+        side = signal["side"]
         bucket_id = signal.get("bucket_id")
 
-        # -----------------------------------------------------------------
-        # a) Bot state (pause / kill‑switch)
-        # -----------------------------------------------------------------
-        if self.bot_ctrl.is_paused or self.bot_ctrl.kill_switch_active:
-            log.info("Bot paused or kill‑switch active – ignoring signal")
-            return {"executed": False, "reason": "bot_paused_or_killed"}
-
-        # -----------------------------------------------------------------
-        # b) Run all pre‑trade guards
-        # -----------------------------------------------------------------
-        if not self._pre_trade_guard(signal):
-            # Guard already logged the reason and incremented the counter.
-            return {"executed": False, "reason": "guard_rejection"}
-
-        # -----------------------------------------------------------------
-        # c) Regime‑based risk multiplier
-        # -----------------------------------------------------------------
-        risk_multiplier = self._regime_multiplier(bar)
-
-        # -----------------------------------------------------------------
-        # d) Compute stake (USD) and translate to lot size
-        # -----------------------------------------------------------------
-        stake_usd = self.risk_mgr.compute_stake(
-            bucket_id=signal["bucket_id"],
-            equity=self.risk_mgr.current_equity(),
-        )
-        # Apply regime multiplier
-        stake_usd *= risk_multiplier
-
-        lot = self._lot_from_stake(
-            stake_usd, contract_notional=self.cfg.get("contract_notional", 100_000)
-        )
-        # Enforce minimum lot size from config
-        min_lot = self.cfg.get("min_lot", 0.01)
-        lot = max(lot, min_lot)
-
-        # -----------------------------------------------------------------
-        # e) Choose broker (primary / secondary) and send the order
-        # -----------------------------------------------------------------
-        broker = self._choose_broker(symbol)
-
-        # -----------------------------------------------------------------
-        # f) Shadow mode handling
-        # -----------------------------------------------------------------
-        if self.shadow:
-            # Simulate a fill with a tiny random jitter (±0.5 pip)
-            jitter = random.uniform(-0.0005, 0.0005)
-            fill_price = price + jitter if price is not None else None
-
-            latency = time.time() - start_ts
-            order_latency_seconds.labels(symbol=symbol, shadow="yes").observe(latency)
-
-            # Slippage in pips
-            if fill_price is not None:
-                pip_factor = 0.0001
-                if symbol.upper().endswith("JPY"):
-                    pip_factor = 0.01
-                slippage = abs(fill_price - price) / pip_factor
-                order_price_slippage.labels(symbol=symbol, side=side).inc(slippage)
-            else:
-                slippage = None
-
-            # Persist a JSON line to the shadow log
-            shadow_entry = {
-                "timestamp": utc_now().isoformat(),
-                "symbol": symbol,
-                "side": side,
-                "requested_price": price,
-                "fill_price": round(fill_price, 5) if fill_price else None,
-                "lot": lot,
-                "latency_seconds": round(latency, 4),
-                "slippage_pips": round(slippage, 3) if slippage else None,
-                "reason": "shadow_mode",
-            }
-            shadow_path = Path("/var/log/cqt/shadow.log")
-            shadow_path.parent.mkdir(parents=True, exist_ok=True)
-            with shadow_path.open("a", encoding="utf-8") as fp:
-                fp.write(json.dumps(shadow_entry) + "\n")
-
-            self.shadow_counter.labels(symbol=symbol, direction=side).inc()
-            log.debug("[SHADOW] %s", shadow_entry)
-
-            return {
-                "executed": True,
-                "shadow": True,
-                "fill_price": fill_price,
-                "lot": lot,
-                "latency_seconds": latency,
-                "slippage_pips": slippage,
-            }
-
-        # -----------------------------------------------------------------
-        # g) REAL mode – actually send the order to the broker
-        # -----------------------------------------------------------------
+        # REAL mode – actually send the order to the broker
         try:
             broker_response = broker.send_order(
                 symbol=symbol,
@@ -466,21 +470,18 @@ class AdvancedExecutionEngine:
                 take_profit=signal.get("take_profit"),
                 comment="Citadel‑QT",
             )
-        except Exception as exc:  # pragma: no cover – exercised via unit tests
+        except Exception as exc:  # pragma: no cover
             log.exception(
                 "Broker %s raised exception for %s",
                 broker.__class__.__name__,
                 symbol,
             )
-            # Record failure latency (still counts as a latency measurement)
             order_latency_seconds.labels(symbol=symbol, shadow="no").observe(
                 time.time() - start_ts
             )
             return {"executed": False, "reason": f"broker_error: {exc}"}
 
-        # -----------------------------------------------------------------
-        # h) Record latency & slippage (if fill info is available)
-        # -----------------------------------------------------------------
+        # Record latency & slippage
         latency = time.time() - start_ts
         order_latency_seconds.labels(symbol=symbol, shadow="no").observe(latency)
 
@@ -494,9 +495,7 @@ class AdvancedExecutionEngine:
         else:
             slippage = None
 
-        # -----------------------------------------------------------------
-        # i) Log the trade opening in the immutable ledger
-        # -----------------------------------------------------------------
+        # Log the trade opening in the immutable ledger
         self.trade_logger.log_trade_open(
             symbol=symbol,
             direction=side,
@@ -504,7 +503,7 @@ class AdvancedExecutionEngine:
             lot_size=lot,
             stop_loss=signal.get("stop_loss"),
             take_profit=signal.get("take_profit"),
-            entry_quality=int(risk_multiplier * 100),  # simple quality proxy
+            entry_quality=int(risk_multiplier * 100),
             confluence_score=signal.get("confluence_score", 0),
             mtf_alignment=signal.get("mtf_alignment", 0.0),
             market_regime=self._current_regime_label(),
@@ -524,24 +523,14 @@ class AdvancedExecutionEngine:
             ),
         )
 
-        # -----------------------------------------------------------------
-        # j) Update the risk manager – deduct the risk‑fraction for this trade
-        # -----------------------------------------------------------------
+        # Update the risk manager
         if bucket_id is not None:
-            # The risk manager will later adjust the bucket's remaining
-            # risk‑fraction based on the eventual P&L.
-            self.risk_mgr.record_successful_trade(bucket_id, required_usd)
+            self.risk_mgr.record_successful_trade(bucket_id, signal["required_volume"])
 
-        # -----------------------------------------------------------------
-        # k) Emit Prometheus metrics for the successful order
-        # -----------------------------------------------------------------
+        # Emit Prometheus metrics
         depth_ok_gauge.labels(bucket_id=str(bucket_id), symbol=symbol).inc()
-        # (If you want a separate failure counter, increment it in the
-        #  exception block above.)
 
-        # -----------------------------------------------------------------
-        # l) Return a normalized response to the caller
-        # -----------------------------------------------------------------
+        # Return normalized response
         result = {
             "executed": True,
             "shadow": False,
@@ -567,15 +556,86 @@ class AdvancedExecutionEngine:
         return result
 
     # -----------------------------------------------------------------
+    # Core order‑submission entry point (sync – called from the signal loop)
+    # ✅ FIXED: Reduced cognitive complexity from 25 to 11 by extracting helper methods
+    # ✅ FIXED: Removed unused local variables `required_usd` and `volume`
+    # -----------------------------------------------------------------
+    def send_order(self, signal: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Expected keys in ``signal``:
+            - ``symbol``
+            - ``side`` (``"BUY"`` / ``"SELL"``)
+            - ``price`` (desired entry price)
+            - ``volume`` (positive for BUY, negative for SELL)
+            - ``required_volume`` (USD risk amount)
+            - ``bar`` (latest OHLCV bar – needed for regime)
+            - ``bucket_id`` (risk bucket identifier)
+
+        Returns a dict compatible with the rest of the CQT codebase.
+        """
+        start_ts = time.time()
+        symbol = signal["symbol"]
+        side = signal["side"]
+        price = signal.get("price")
+        bar = signal.get("bar", {})
+
+        # -----------------------------------------------------------------
+        # a) Bot state (pause / kill‑switch)
+        # -----------------------------------------------------------------
+        if self.bot_ctrl.is_paused or self.bot_ctrl.kill_switch_active:
+            log.info("Bot paused or kill‑switch active – ignoring signal")
+            return {"executed": False, "reason": "bot_paused_or_killed"}
+
+        # -----------------------------------------------------------------
+        # b) Run all pre‑trade guards
+        # -----------------------------------------------------------------
+        if not self._pre_trade_guard(signal):
+            return {"executed": False, "reason": "guard_rejection"}
+
+        # -----------------------------------------------------------------
+        # c) Regime‑based risk multiplier
+        # -----------------------------------------------------------------
+        risk_multiplier = self._regime_multiplier(bar)
+
+        # -----------------------------------------------------------------
+        # d) Compute stake (USD) and translate to lot size
+        # -----------------------------------------------------------------
+        stake_usd = self.risk_mgr.compute_stake(
+            bucket_id=signal["bucket_id"],
+            equity=self.risk_mgr.current_equity(),
+        )
+        # Apply regime multiplier
+        stake_usd *= risk_multiplier
+
+        lot = self._lot_from_stake(
+            stake_usd, contract_notional=self.cfg.get("contract_notional", 100_000)
+        )
+        # Enforce minimum lot size from config
+        min_lot = self.cfg.get("min_lot", 0.01)
+        lot = max(lot, min_lot)
+
+        # -----------------------------------------------------------------
+        # e) Choose broker (primary / secondary)
+        # -----------------------------------------------------------------
+        broker = self._choose_broker(symbol)
+
+        # -----------------------------------------------------------------
+        # f) Route to shadow or real mode
+        # -----------------------------------------------------------------
+        if self.shadow:
+            return self._handle_shadow_mode(signal, start_ts, price, lot)
+        else:
+            return self._handle_real_mode(signal, broker, start_ts, price, lot, risk_multiplier)
+
+    # -----------------------------------------------------------------
     # Public API – entry point used by the signal engine
+    # ✅ FIXED: Removed `async` keyword (was unused – no await operations)
     # -----------------------------------------------------------------
     def execute_signal(self, signal: Dict[str, Any]) -> Dict[str, Any]:
         """
         Wrapper that the higher‑level signal dispatcher calls.
         It performs a quick pause/kill‑switch check, runs the guard chain,
         and finally forwards the signal to ``send_order``.
-        
-        ✅ FIXED: Removed `async` keyword (was unused – no await operations)
         """
         # 0️⃣ Global bot state (pause / kill‑switch)
         if self.bot_ctrl.is_paused or self.bot_ctrl.kill_switch_active:
@@ -584,7 +644,6 @@ class AdvancedExecutionEngine:
 
         # 1️⃣ Run the full guard suite (synchronous)
         if not self._pre_trade_guard(signal):
-            # Guard already logged why it was rejected.
             return {"executed": False, "reason": "guard_rejection"}
 
         # 2️⃣ All clear – forward to the order‑submission routine.
