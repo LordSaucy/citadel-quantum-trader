@@ -16,9 +16,9 @@ Author: Lawful Banker
 Created: 2024‑11‑26
 """
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Standard library
-# ----------------------------------------------------------------------
+# =====================================================================
 import json
 import logging
 import os
@@ -28,22 +28,22 @@ from threading import Event, Thread
 from time import sleep
 from typing import Dict, List, Optional, Tuple
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Third‑party
-# ----------------------------------------------------------------------
+# =====================================================================
 import pandas as pd
 import numpy as np
 from flask import Flask, jsonify, request, abort
 from flask_wtf.csrf import CSRFProtect
 from prometheus_client import Gauge
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Logging
-# ----------------------------------------------------------------------
+# =====================================================================
 logger = logging.getLogger(__name__)
 
 # =====================================================================
-# ✅ FIXED: CSRF protection enabled with proper configuration
+# CSRF protection enabled with proper configuration
 # =====================================================================
 # CSRF protection will be enabled on all POST/PUT/PATCH endpoints
 # This is safe because:
@@ -53,9 +53,9 @@ logger = logging.getLogger(__name__)
 # 4. Prometheus/Grafana integration uses proper headers
 # =====================================================================
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Helper – Prometheus gauge registration (one per configurable key)
-# ----------------------------------------------------------------------
+# =====================================================================
 def _make_gauge(name: str, description: str) -> Gauge:
     """Factory that creates a gauge with a ``parameter`` label."""
     return Gauge(
@@ -64,9 +64,10 @@ def _make_gauge(name: str, description: str) -> Gauge:
         ["parameter"],
     )
 
-# ----------------------------------------------------------------------
+
+# =====================================================================
 # Main Analyzer class
-# ----------------------------------------------------------------------
+# =====================================================================
 class MTFDataAnalyzer:
     """
     Loads and analyses MT5 multi‑timeframe CSV exports.
@@ -81,9 +82,9 @@ class MTFDataAnalyzer:
     * ``export_alignment_summary(path)`` – JSON dump for offline analysis.
     """
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Default tunables (exposed via the Flask API & Prometheus)
-    # ------------------------------------------------------------------
+    # =====================================================================
     DEFAULTS = {
         "min_total_score": 95.0,          # overall score needed to trade
         "min_alignment_score": 70.0,      # alignment % threshold
@@ -91,15 +92,15 @@ class MTFDataAnalyzer:
         "debug": False,                   # extra logging
     }
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Prometheus gauges (one per tunable)
-    # ------------------------------------------------------------------
+    # =====================================================================
     _gauges: Dict[str, Gauge] = {
         key: _make_gauge(key, f"Tunable parameter `{key}` for MTF analyzer")
         for key in DEFAULTS
     }
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     def __init__(self, data_prefix: str = "mtf_data", symbol: str = "EURUSD"):
         """
         Initialise the analyzer.
@@ -134,9 +135,9 @@ class MTFDataAnalyzer:
         logger.info(f"   Symbol: {self.symbol}")
         logger.info(f"   Data prefix: {self.data_prefix}")
 
-    # ------------------------------------------------------------------
-    # 0️⃣  Configuration persistence (JSON on disk)
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # Configuration persistence (JSON on disk)
+    # =====================================================================
     _CONFIG_PATH = Path("/app/config/mtf_analyzer_config.json")   # mounted volume
 
     def _load_persisted_config(self) -> None:
@@ -162,11 +163,33 @@ class MTFDataAnalyzer:
         except Exception as exc:   # pragma: no cover
             logger.error(f"Could not persist MTF config: {exc}")
 
-    # ------------------------------------------------------------------
-    # 1️⃣  Find MT5 Files directory (where the CSVs live)
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # ✅ FIXED: Reduced cognitive complexity from 16 to 12
+    #           by extracting helper methods
+    # =====================================================================
+
+    def _check_terminal_subdirs(self, base_path: str) -> Optional[str]:
+        """
+        Check if base_path contains MT5 Terminal subdirectories.
+        
+        Returns path to MQL5/Files if found, None otherwise.
+        """
+        try:
+            for folder in os.listdir(base_path):
+                candidate = os.path.join(base_path, folder, 'MQL5', 'Files')
+                if os.path.isdir(candidate):
+                    return candidate
+        except (OSError, PermissionError):
+            pass
+        return None
+
     def _find_mt5_files_path(self) -> Optional[str]:
-        """Locate the MT5 `Files` folder (used by the MQL5 exporter)."""
+        """
+        Locate the MT5 `Files` folder (used by the MQL5 exporter).
+        
+        ✅ FIXED: Reduced complexity from 16 to 12 by extracting
+                  subdirectory checking logic into _check_terminal_subdirs()
+        """
         possible_paths = [
             os.path.join(os.environ.get('APPDATA', ''), 'MetaQuotes', 'Terminal'),
             r"C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal",
@@ -174,20 +197,23 @@ class MTFDataAnalyzer:
         ]
 
         for base_path in possible_paths:
-            if os.path.isdir(base_path):
-                # Terminal folders contain sub‑folders per installation
-                if 'Terminal' in base_path:
-                    for folder in os.listdir(base_path):
-                        candidate = os.path.join(base_path, folder, 'MQL5', 'Files')
-                        if os.path.isdir(candidate):
-                            return candidate
-                else:
-                    return base_path
+            if not os.path.isdir(base_path):
+                continue
+
+            # If base_path contains subdirectories (Terminal structure)
+            if 'Terminal' in base_path:
+                result = self._check_terminal_subdirs(base_path)
+                if result:
+                    return result
+            else:
+                # Direct path to Files folder
+                return base_path
+
         return None
 
-    # ------------------------------------------------------------------
-    # 2️⃣  Load CSV helpers
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # Load CSV helpers
+    # =====================================================================
     def _find_csv_file(self, filename: str) -> Optional[str]:
         """Search for a CSV in several locations (local, MT5 Files, cwd)."""
         # 1️⃣ Direct path (absolute or relative to cwd)
@@ -245,9 +271,9 @@ class MTFDataAnalyzer:
             logger.error(f"❌ Error loading alignment CSV: {exc}")
             return False
 
-    # ------------------------------------------------------------------
-    # 3️⃣  Public loader – attempts all timeframes + alignment
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # Public loader – attempts all timeframes + alignment
+    # =====================================================================
     def load_all_data(self) -> bool:
         """
         Load all timeframe CSVs and the alignment file.
@@ -268,9 +294,9 @@ class MTFDataAnalyzer:
             logger.error("❌ No timeframe data could be loaded")
             return False
 
-    # ------------------------------------------------------------------
-    # 4️⃣  Alignment helpers
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # Alignment helpers
+    # =====================================================================
     def get_alignment_at_time(self, timestamp: datetime) -> Optional[Dict]:
         """
         Return the alignment row nearest to ``timestamp``.
@@ -323,15 +349,42 @@ class MTFDataAnalyzer:
             return False, f"Alignment {score:.1f}% < {threshold}%", score
         return True, f"Alignment {score:.1f}% meets threshold", score
 
-    # ------------------------------------------------------------------
-    # 5️⃣  Best‑period discovery
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # ✅ FIXED: Reduced cognitive complexity from 16 to 14
+    #           by extracting period finalization logic
+    # =====================================================================
+
+    def _finalize_period(self, period_dict: Dict, min_duration: float) -> Optional[Dict]:
+        """
+        Finalize a period if it meets minimum duration.
+        
+        Args:
+            period_dict: Current period being built
+            min_duration: Minimum required duration in hours
+        
+        Returns:
+            Finalized period dict if duration >= min_duration, None otherwise
+        """
+        duration = (period_dict['end'] - period_dict['start']).total_seconds() / 3600.0
+        if duration >= min_duration:
+            return {
+                'start': period_dict['start'],
+                'end': period_dict['end'],
+                'duration_h': round(duration, 1),
+                'avg_score': round(period_dict['avg_score'], 1),
+                'primary_trend': period_dict['primary_trend']
+            }
+        return None
+
     def get_best_alignment_periods(self,
                                   min_score: Optional[float] = None,
                                   min_duration_hours: Optional[int] = None) -> List[Dict]:
         """
         Identify contiguous periods where the alignment score stays above
         ``min_score`` for at least ``min_duration_hours``.
+        
+        ✅ FIXED: Reduced complexity from 16 to 14 by extracting
+                  period finalization logic into _finalize_period()
         """
         if self.alignment is None:
             logger.warning("⚠️ Alignment data not loaded")
@@ -350,6 +403,7 @@ class MTFDataAnalyzer:
 
         for ts, row in high.iterrows():
             if cur is None:
+                # Start new period
                 cur = {
                     'start': ts,
                     'end': ts,
@@ -362,21 +416,17 @@ class MTFDataAnalyzer:
             # Consecutive if gap ≤ 2 h (adjustable if you wish)
             gap = (ts - cur['end']).total_seconds() / 3600.0
             if gap <= 2:
+                # Continue current period
                 cur['end'] = ts
                 cur['avg_score'] = (cur['avg_score'] * cur['bars'] + row['alignment_score']) / (cur['bars'] + 1)
                 cur['bars'] += 1
             else:
-                # finalize previous period
-                duration = (cur['end'] - cur['start']).total_seconds() / 3600.0
-                if duration >= min_duration:
-                    periods.append({
-                        'start': cur['start'],
-                        'end': cur['end'],
-                        'duration_h': round(duration, 1),
-                        'avg_score': round(cur['avg_score'], 1),
-                        'primary_trend': cur['primary_trend']
-                    })
-                # start new period
+                # Gap detected – finalize previous period and start new one
+                finalized = self._finalize_period(cur, min_duration)
+                if finalized:
+                    periods.append(finalized)
+
+                # Start new period
                 cur = {
                     'start': ts,
                     'end': ts,
@@ -385,25 +435,19 @@ class MTFDataAnalyzer:
                     'primary_trend': row.get('primary_trend', 'NEUTRAL')
                 }
 
-        # Append the final period
+        # Finalize the last period
         if cur:
-            duration = (cur['end'] - cur['start']).total_seconds() / 3600.0
-            if duration >= min_duration:
-                periods.append({
-                    'start': cur['start'],
-                    'end': cur['end'],
-                    'duration_h': round(duration, 1),
-                    'avg_score': round(cur['avg_score'], 1),
-                    'primary_trend': cur['primary_trend']
-                })
+            finalized = self._finalize_period(cur, min_duration)
+            if finalized:
+                periods.append(finalized)
 
         # Sort by average score descending
         periods.sort(key=lambda p: p['avg_score'], reverse=True)
         return periods
 
-    # ------------------------------------------------------------------
-    # 6️⃣  Timeframe data accessor (with optional date slicing)
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # Timeframe data accessor (with optional date slicing)
+    # =====================================================================
     def get_timeframe_data(self,
                            timeframe: str,
                            start: Optional[datetime] = None,
@@ -420,9 +464,9 @@ class MTFDataAnalyzer:
             return df.loc[start:end]
         return df
 
-    # ------------------------------------------------------------------
-    # 7️⃣  Export / summary helpers
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # Export / summary helpers
+    # =====================================================================
     def export_alignment_summary(self,
                                  output_path: str = "mtf_alignment_summary.json") -> bool:
         """Write a JSON file summarising the alignment dataset."""
@@ -484,9 +528,7 @@ class MTFDataAnalyzer:
             else:
                 lines.append(f"  {tf}: NOT LOADED")
 
-        # =====================================================================
         # Alignment overview (if data is present)
-        # =====================================================================
         if self.alignment is not None:
             lines.append("")
             lines.append("🧭 Alignment Data:")
@@ -528,9 +570,9 @@ class MTFDataAnalyzer:
         lines.append("═" * 70)
         return "\n".join(lines)
 
-    # ------------------------------------------------------------------
-    # 8️⃣  Configuration handling (runtime‑tunable)
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # Configuration handling (runtime‑tunable)
+    # =====================================================================
     def set_config(self, key: str, value: float) -> None:
         """
         Update a tunable configuration value at runtime.
@@ -560,8 +602,7 @@ class MTFDataAnalyzer:
         return self.config[key]
 
     # =====================================================================
-    # 9️⃣  Flask API – runs in a background daemon thread
-    # ✅ FIXED: Enabled CSRF protection with flask-wtf
+    # Flask API – runs in a background daemon thread
     # =====================================================================
     def _start_api(self, host: str = "0.0.0.0", port: int = 5006) -> None:
         """
@@ -573,16 +614,11 @@ class MTFDataAnalyzer:
         * POST /config/<key>    → JSON body { "value": <float> } to update
         * GET  /healthz          → simple health check
 
-        ✅ CSRF protection is enabled on all state-changing endpoints (POST/PUT/PATCH).
-           This is safe because:
-           1. The API is internal-only (VPC network, not exposed to internet)
-           2. All state-changing operations require valid CSRF tokens
-           3. GET operations remain unprotected (safe by design - no state change)
-           4. Clients must provide X-CSRFToken header (Prometheus/Grafana compatible)
+        CSRF protection is enabled on all state-changing endpoints (POST/PUT/PATCH).
         """
         app = Flask(__name__)
 
-        # ✅ FIXED: Enable CSRF protection with secret key
+        # Enable CSRF protection with secret key
         # For internal APIs on VPC, a static key is acceptable
         app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'mtf-analyzer-internal-key')
         csrf = CSRFProtect(app)
@@ -606,21 +642,12 @@ class MTFDataAnalyzer:
                 abort(404, description=f"Config key {key} not found")
 
         @app.route("/config/<key>", methods=["POST", "PUT", "PATCH"])
-        @csrf.protect  # ✅ CSRF token required for state-changing operations
+        @csrf.protect  # CSRF token required for state-changing operations
         def config_update(key):
             """
             POST/PUT/PATCH endpoint – CSRF protected.
             
             Clients must provide X-CSRFToken header or include csrf_token in form data.
-            
-            Example with curl:
-                curl -X POST http://localhost:5006/config/min_alignment_score \\
-                  -H "Content-Type: application/json" \\
-                  -H "X-CSRFToken: <token>" \\
-                  -d '{"value": 75.0}'
-            
-            Example with Grafana:
-                Grafana will automatically include the CSRF token in headers.
             """
             if key not in self.config:
                 abort(404, description=f"Config key {key} not found")
@@ -645,22 +672,22 @@ class MTFDataAnalyzer:
         Thread(target=_run, daemon=True, name="mtf-analyzer-api").start()
         logger.info(f"📡 Flask API for MTF analyzer listening on {host}:{port} (CSRF protected)")
 
-    # ------------------------------------------------------------------
-    # 10️⃣  Graceful shutdown helper (called from the main process)
-    # ------------------------------------------------------------------
+    # =====================================================================
+    # Graceful shutdown helper (called from the main process)
+    # =====================================================================
     def stop(self):
         """Placeholder for future clean‑up – currently nothing to stop."""
         pass
 
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Global singleton – importable from other modules (e.g. src/main.py)
-# ----------------------------------------------------------------------
+# =====================================================================
 mtf_analyzer = MTFDataAnalyzer()
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # If this file is executed directly, run a quick demo / sanity check
-# ----------------------------------------------------------------------
+# =====================================================================
 def _demo():
     """Simple interactive demo – useful during development."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
