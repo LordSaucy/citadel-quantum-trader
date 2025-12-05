@@ -1,6 +1,6 @@
 # utils.py
 import json, hashlib, base64, logging, os
-import boto3
+from src.aws.s3_client import get_s3_client
 from botocore.exceptions import ClientError
 
 log = logging.getLogger('cqt.signing')
@@ -38,14 +38,7 @@ def s3_put(bucket: str, key: str, body: bytes, content_type: str = 'application/
     """Upload a binary blob to S3 with server‑side encryption (SSE‑KMS)."""
     s3 = boto3.client('s3')
     try:
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=body,
-            ServerSideEncryption='aws:kms',
-            SSEKMSKeyId=os.getenv('AWS_KMS_S3_KEY'),   # separate key for S3 encryption
-            ContentType=content_type
-        )
+        s3 = get_s3_client()
         log.info("Uploaded %s to s3://%s/%s", content_type, bucket, key)
     except ClientError as exc:
         log.error("S3 upload failed: %s", exc)
