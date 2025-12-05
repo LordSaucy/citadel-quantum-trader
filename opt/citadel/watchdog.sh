@@ -118,7 +118,7 @@ log() {
     
     # Send to Slack if configured (non-blocking)
     if [[ -n "$SLACK_WEBHOOK_URL" ]]; then
-        send_slack_alert "$ts" "$level" "$msg" || true
+        send_slack_alert "$level" "$msg" || true
     fi
     
     return 0
@@ -127,18 +127,16 @@ log() {
 # Send alert to Slack webhook
 #
 # Arguments:
-#   $1: Timestamp
-#   $2: Log level
-#   $3: Message
+#   $1: Log level
+#   $2: Message
 #
 # Returns:
 #   0 on success
 #   1 on failure (curl error)
 #
 send_slack_alert() {
-    local ts="$1"
-    local level="$2"
-    local msg="$3"
+    local level="$1"
+    local msg="$2"
     local color icon
     
     case "$level" in
@@ -394,13 +392,11 @@ move_floating_ip() {
     response=$(printf '%s' "$response" | sed '$d')
     
     # Check for success (HTTP 201 for action creation)
-    if [[ "$http_code" == "201" ]] || [[ "$http_code" == "200" ]]; then
-        if printf '%s' "$response" | jq -e '.action' >/dev/null 2>&1; then
-            log "FAILOVER SUCCESS: Floating IP reassigned to standby ($STANDBY_HOST)" "CRITICAL"
-            FAILOVER_TRIGGERED=1
-            save_state
-            return 0
-        fi
+    if ( [[ "$http_code" == "201" ]] || [[ "$http_code" == "200" ]] ) && printf '%s' "$response" | jq -e '.action' >/dev/null 2>&1; then
+        log "FAILOVER SUCCESS: Floating IP reassigned to standby ($STANDBY_HOST)" "CRITICAL"
+        FAILOVER_TRIGGERED=1
+        save_state
+        return 0
     fi
     
     log "FAILOVER FAILED: HTTP $http_code. Response: $response" "ERROR"
@@ -428,11 +424,9 @@ move_floating_ip() {
 #
 main_loop() {
     local ok_checks
-    local loop_count=0
     
     while true; do
         ok_checks=0
-        ((loop_count++))
         
         # Run the three health checks
         if check_health "$HEALTH_URL"; then
@@ -489,9 +483,11 @@ main_loop() {
 # Graceful shutdown handler
 #
 # Called when the script receives SIGINT (Ctrl+C) or SIGTERM
+# This is a signal handler - it does not return, it exits.
 #
 # Returns:
-#   130 (standard exit code for SIGINT termination)
+#   Does not return - calls exit 130 instead
+#   (130 is standard exit code for SIGINT/SIGTERM termination)
 #
 cleanup() {
     log "Watchdog received termination signal – performing cleanup" "INFO"
@@ -500,6 +496,8 @@ cleanup() {
     save_state || true
     
     log "Watchdog shutdown complete" "INFO"
+    
+    # Exit with standard signal termination code (doesn't return)
     exit 130
 }
 
