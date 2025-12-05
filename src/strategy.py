@@ -7,10 +7,13 @@ Provides the `build_signal_function()` factory that returns a strategy callable
 compatible with BacktestValidator. The strategy receives a DataFrame of historical
 bars (up to and including the current bar) and returns a signal dict if an entry
 condition is met.
+
+✅ FIXED: Removed unused local variables and modernized numpy.random.Generator
 """
 
 from typing import Callable, Dict, Optional
 import pandas as pd
+import numpy as np
 
 
 def build_signal_function(params: Optional[Dict] = None) -> Callable[[pd.DataFrame], Optional[Dict]]:
@@ -41,10 +44,10 @@ def build_signal_function(params: Optional[Dict] = None) -> Callable[[pd.DataFra
     if params is None:
         params = {}
     
-    # =========================================================================
+    # =====================================================================
     # ✅ FIXED: Inner signal() function now uses the 'data' parameter
     #           and returns None if no signal (instead of implicit None)
-    # =========================================================================
+    # =====================================================================
     def signal(data: pd.DataFrame) -> Optional[Dict]:
         """
         Generate a trading signal from historical bar data.
@@ -72,17 +75,18 @@ def build_signal_function(params: Optional[Dict] = None) -> Callable[[pd.DataFra
             # Need at least 2 bars for any meaningful analysis
             return None
         
-        # --------- Extract current and previous bars ---------
+        # --------- Extract current bar ---------
         current_bar = data.iloc[-1]
-        previous_bar = data.iloc[-2]
+        # ✅ FIXED: Removed unused local variable `previous_bar`
+        # (was: previous_bar = data.iloc[-2])
         
         # --------- Example strategy logic ---------
         # This is a minimal example; replace with your actual strategy
         
         # 1️⃣ Extract OHLCV from current bar
         close = current_bar["close"]
-        high = current_bar["high"]
-        low = current_bar["low"]
+        # ✅ FIXED: Removed unused local variables `high` and `low`
+        # (were: high = current_bar["high"], low = current_bar["low"])
         volume = current_bar["volume"]
         
         # 2️⃣ Calculate a simple indicator (e.g., momentum or confluence score)
@@ -152,9 +156,9 @@ def build_signal_function(params: Optional[Dict] = None) -> Callable[[pd.DataFra
     return signal
 
 
-# =========================================================================
+# =====================================================================
 # Example usage
-# =========================================================================
+# =====================================================================
 if __name__ == "__main__":
     # Create a signal function with custom parameters
     params = {
@@ -168,10 +172,11 @@ if __name__ == "__main__":
     signal_func = build_signal_function(params)
     
     # Simulate historical data
-    import numpy as np
+    # ✅ FIXED: Use modern numpy.random.Generator instead of legacy functions
+    rng = np.random.default_rng(seed=42)
     
     dates = pd.date_range("2024-01-01", periods=100, freq="H")
-    prices = np.cumsum(np.random.randn(100) * 0.0001) + 1.0800
+    prices = np.cumsum(rng.standard_normal(100) * 0.0001) + 1.0800
     
     df = pd.DataFrame({
         "time": dates,
@@ -179,7 +184,7 @@ if __name__ == "__main__":
         "high": prices + 0.0001,
         "low": prices - 0.0001,
         "close": prices,
-        "volume": np.random.randint(1000, 5000, 100),
+        "volume": rng.integers(1000, 5000, 100),
     })
     
     # Generate signals for the entire history
