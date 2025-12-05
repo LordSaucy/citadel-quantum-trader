@@ -26,7 +26,7 @@ class WithdrawReq(BaseModel):
 @router.post("/pause", response_model=dict)
 async def pause(req: PauseReq | None = None, token: str = Depends(get_current_user)):
     engine.pause(reason=req.reason if req else None)
-    return {"paused": True, "since": datetime.utcnow(timezone.utc).isoformat()+"Z", "reason": req.reason if req else None}
+    return {"paused": True, "since": datetime.now(timezone.utc).isoformat()+"Z", "reason": req.reason if req else None}
 
 @router.post("/resume", response_model=dict)
 async def resume(token: str = Depends(get_current_user)):
@@ -38,7 +38,7 @@ async def kill(req: KillReq, token: str = Depends(get_current_user)):
     engine.activate_kill_switch(duration=timedelta(seconds=req.duration_seconds),
                                reason=req.reason)
     return {"kill_active": True,
-            "expires_at": (datetime.utcnow(timezone.utc)+timedelta(seconds=req.duration_seconds)).isoformat()+"Z",
+            "expires_at": (datetime.now(timezone.utc)+timedelta(seconds=req.duration_seconds)).isoformat()+"Z",
             "reason": req.reason}
 
 @router.get("/kill/status", response_model=dict)
