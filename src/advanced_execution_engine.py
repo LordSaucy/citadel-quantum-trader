@@ -148,7 +148,7 @@ class AdvancedExecutionEngine:
             cfg_logger.warning(
                 "HMM model not found – falling back to dummy regime classifier"
             )
-            self.regime_clf = None  # treat as always “neutral”
+            self.regime_clf = None  # treat as always "neutral"
 
         # -----------------------------------------------------------------
         # 5️⃣ Guard instances (sentiment, calendar, volatility, shock)
@@ -196,7 +196,7 @@ class AdvancedExecutionEngine:
     def _lot_from_stake(stake_usd: float, contract_notional: float = 100_000) -> float:
         """
         Convert a dollar stake into a lot size.
-        By default we assume 1 lot = 100 000 units (standard FX lot).
+        By default we assume 1 lot = 100 000 units (standard FX lot).
         """
         return stake_usd / contract_notional
 
@@ -206,7 +206,7 @@ class AdvancedExecutionEngine:
     def _choose_broker(self, symbol: str) -> Any:
         """
         Simple routing rule:
-        * Symbols ending with “USD” → primary broker (MT5 by default)
+        * Symbols ending with "USD" → primary broker (MT5 by default)
         * Everything else → secondary broker (IBKR by default)
         """
         return (
@@ -407,7 +407,7 @@ class AdvancedExecutionEngine:
         # f) Shadow mode handling
         # -----------------------------------------------------------------
         if self.shadow:
-            # Simulate a fill with a tiny random jitter (±0.5 pip)
+            # Simulate a fill with a tiny random jitter (±0.5 pip)
             jitter = random.uniform(-0.0005, 0.0005)
             fill_price = price + jitter if price is not None else None
 
@@ -453,7 +453,7 @@ class AdvancedExecutionEngine:
                 "slippage_pips": slippage,
             }
 
-                # -----------------------------------------------------------------
+        # -----------------------------------------------------------------
         # g) REAL mode – actually send the order to the broker
         # -----------------------------------------------------------------
         try:
@@ -528,7 +528,7 @@ class AdvancedExecutionEngine:
         # j) Update the risk manager – deduct the risk‑fraction for this trade
         # -----------------------------------------------------------------
         if bucket_id is not None:
-            # The risk manager will later adjust the bucket’s remaining
+            # The risk manager will later adjust the bucket's remaining
             # risk‑fraction based on the eventual P&L.
             self.risk_mgr.record_successful_trade(bucket_id, required_usd)
 
@@ -562,18 +562,20 @@ class AdvancedExecutionEngine:
             price,
             lot,
             latency,
-            f"{slippage:.2f} pips" if slippage is not None else "N/A",
+            f"{slippage:.2f} pips" if slippage is not None else "N/A",
         )
         return result
 
     # -----------------------------------------------------------------
     # Public API – entry point used by the signal engine
     # -----------------------------------------------------------------
-    async def execute_signal(self, signal: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_signal(self, signal: Dict[str, Any]) -> Dict[str, Any]:
         """
         Wrapper that the higher‑level signal dispatcher calls.
         It performs a quick pause/kill‑switch check, runs the guard chain,
         and finally forwards the signal to ``send_order``.
+        
+        ✅ FIXED: Removed `async` keyword (was unused – no await operations)
         """
         # 0️⃣ Global bot state (pause / kill‑switch)
         if self.bot_ctrl.is_paused or self.bot_ctrl.kill_switch_active:
