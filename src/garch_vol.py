@@ -257,7 +257,7 @@ class GarchVolatilityEstimator:
                 logger.exception("GARCH fitting failed")
                 raise RuntimeError(f"GARCH fitting failed: {exc}") from exc
 
-        self._last_fit_ts = pd.Timestamp(datetime.utcnow())
+        self._last_fit_ts = pd.Timestamp(datetime.now())
         self._reset_cache()
         logger.info(
             "GARCH(p=%s, q=%s, dist=%s) fitted on %d observations (last fit @ %s)",
@@ -296,7 +296,7 @@ class GarchVolatilityEstimator:
         # ----------------------------------------------------------------
         # Cache lookup – avoid recomputing the same forecast within the TTL
         # ----------------------------------------------------------------
-        now = datetime.utcnow()
+        now = datetime.now()
         cache_key = (steps, pd.Timestamp(now))
 
         if cache_key in self._forecast_cache:
