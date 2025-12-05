@@ -1,101 +1,92 @@
 #!/usr/bin/env bash
-# ----------------------------------------------------------------------
-# cqt_backup.sh – Nightly backup & archiving for Citadel Quantum Trader
+# =============================================================================
+# cqt_backup.sh – Nightly backup & archiving for Citadel Quantum Trader (CQT)
 #
-# What it does:
-#   1️⃣  Takes a snapshot of the PostgreSQL block‑storage volume.
-#   2️⃣  Prunes old snapshots (retain only $RETENTION daily snapshots).
-#   3️⃣  Archives CQT log files and streams them to a DigitalOcean Space.
-#   4️⃣  (Optional) Copies any new PostgreSQL WAL files to the same Space.
+# What it does (in order):
+#   1️⃣  Take a snapshot of the PostgreSQL block‑storage volume.
+#   2️⃣  Prune old snapshots (retain only $RETENTION daily snapshots).
+#   3️⃣  Archive CQT log files and upload them to a DigitalOcean Space.
+#   4️⃣  (Optional) Upload any new PostgreSQL WAL files to the same Space.
 #
-# Requirements (on the backup‑svc droplet):
-#   * doctl   – DigitalOcean CLI (authenticated with $DO_TOKEN)
-#   * aws     – AWS CLI (configured for Spaces endpoint)
-#   * jq      – JSON processor (used for snapshot pruning)
-#   * gzip, tar, date, mktemp – standard Unix utilities
+# Requirements on the backup‑svc droplet:
+#   • doctl   – DigitalOcean CLI (authenticated with $DO_TOKEN)
+#   • aws     – AWS CLI (configured for Spaces endpoint)
+#   • jq      – JSON processor (used for snapshot pruning)
+#   • gzip, tar, date, mktemp – standard Unix utilities
 #
-# All secrets are read from Docker secrets (mounted at /run/secrets/*) or
-# from environment variables if the script is run locally.
+# Secrets are read from Docker secrets (mounted at /run/secrets/*) or from
+# environment variables when the script is executed locally.
 #
-# Author:  Citadel Quantum Trader Team
+# Author : Citadel Quantum Trader Team
 # Version: 2024‑11‑28
-# ----------------------------------------------------------------------
+# =============================================================================
 
 set -euo pipefail
 
 # ----------------------------------------------------------------------
-# 0️⃣  Configuration (override via env vars or Docker secrets)
-# ----------------------------------------------------------------------
-# ----- Secrets (Docker‑secret names) ------------------------------------
-# The script will look for these files under /run/secrets/.  If they do
-# not exist it falls back to the corresponding environment variable.
+# 0️⃣  Helper: read a secret (Docker secret → env var fallback)
 # ----------------------------------------------------------------------
 read_secret() {
-    local name="$1"
-    local var_name="$2"
-    if [[ -f "/run/secrets/${name}" ]]; then
-        cat "/run/secrets/${name}"
+    local secret_name="$1"   # Docker‑secret file name (e.g. DO_TOKEN)
+    local env_name="$2"      # Corresponding environment variable name
+    local value
+
+    if [[ -f "/run/secrets/${secret_name}" ]]; then
+        value=$(<"/run/secrets/${secret_name}")
     else
-        printf '%s' "${!var_name:-}"
+        value="${!env_name:-}"
     fi
+    printf '%s' "$value"
+    return 0                     # <-- explicit return for SonarQube
 }
 
-# DigitalOcean API token (required for doctl)
+# ----------------------------------------------------------------------
+# 1️⃣  Configuration (override via env vars or Docker secrets)
+# ----------------------------------------------------------------------
 DO_TOKEN="$(read_secret DO_TOKEN DO_TOKEN)"
-
-# Spaces credentials (required for aws cli)
 SPACES_KEY="$(read_secret SPACES_KEY SPACES_KEY)"
 SPACES_SECRET="$(read_secret SPACES_SECRET SPACES_SECRET)"
-
-# PostgreSQL volume ID (the block‑storage volume that holds the DB data)
 POSTGRES_VOLUME_ID="$(read_secret POSTGRES_VOLUME_ID POSTGRES_VOLUME_ID)"
 
 # ----------------------------------------------------------------------
-# ----- Operational parameters (feel free to tweak) ----------------------
+# 2️⃣  Operational parameters (tweak as needed)
 # ----------------------------------------------------------------------
-# Number of daily snapshots to retain (oldest snapshots beyond this are deleted)
-RETENTION=7
-
-# Spaces bucket name (must already exist in your DO account)
-SPACES_BUCKET="cqt-backups"
-
-# Spaces endpoint – change region if you store the bucket elsewhere
-# Example for nyc3: nyc3.digitaloceanspaces.com
+RETENTION=7                                 # keep the N newest snapshots
+SPACES_BUCKET="cqt-backups"                # must already exist
 SPACES_ENDPOINT="nyc3.digitaloceanspaces.com"
-
-# Log directory on the backup‑svc host (where CQT writes its logs)
 LOG_DIR="/var/log"
-
-# Sub‑directory pattern for CQT logs (adjust if you store logs elsewhere)
-LOG_GLOB="cqt*.log*"
-
-# Temporary working directory (will be removed automatically)
-TMPDIR="$(mktemp -d -t cqt_backup_XXXXXX)"
+LOG_GLOB="cqt*.log*"                       # pattern for CQT logs
+TMPDIR="$(mktemp -d -t cqt_backup_XXXXXX)" # temporary working dir
 
 # ----------------------------------------------------------------------
-# 1️⃣  Helper functions
+# 3️⃣  Helper: structured logging (writes to syslog & local file)
 # ----------------------------------------------------------------------
 log() {
-    local level="$1"
+    local level="$1"   # e.g. info, warn, err, debug
     local msg="$2"
-    # Write to syslog and to the local logfile
+    # Syslog entry (facility=user)
     logger -t cqt_backup -p "user.${level}" "$msg"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] $msg" >> "/var/log/cqt_backup.log"
+    # Local file (append)
+    printf '%s [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$msg" \
+        >> "/var/log/cqt_backup.log"
+    return 0                     # <-- explicit return for SonarQube
 }
 
+# ----------------------------------------------------------------------
+# 4️⃣  Helper: fatal error (log + exit)
+# ----------------------------------------------------------------------
 die() {
-    log "err" "$1"
-    exit 1
+    local errmsg="$1"
+    log "err" "$errmsg"
+    exit 1                       # explicit exit (function never returns)
 }
 
 # ----------------------------------------------------------------------
-# 2️⃣  Verify required tools & env
+# 5️⃣  Verify required binaries & environment variables
 # ----------------------------------------------------------------------
-command -v doctl >/dev/null 2>&1 || die "doctl not installed"
-command -v aws >/dev/null 2>&1   || die "aws CLI not installed"
-command -v jq >/dev/null 2>&1    || die "jq not installed"
-command -v tar >/dev/null 2>&1   || die "tar not installed"
-command -v gzip >/dev/null 2>&1 || die "gzip not installed"
+for cmd in doctl aws jq tar gzip; do
+    command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' is not installed"
+done
 
 [[ -n "$DO_TOKEN" ]]        || die "DO_TOKEN not set"
 [[ -n "$SPACES_KEY" ]]      || die "SPACES_KEY not set"
@@ -103,13 +94,13 @@ command -v gzip >/dev/null 2>&1 || die "gzip not installed"
 [[ -n "$POSTGRES_VOLUME_ID" ]] || die "POSTGRES_VOLUME_ID not set"
 
 # ----------------------------------------------------------------------
-# 3️⃣  Authenticate doctl (only needed once per session)
+# 6️⃣  Authenticate doctl (once per session)
 # ----------------------------------------------------------------------
 export DO_TOKEN
 doctl auth init -t "$DO_TOKEN" >/dev/null 2>&1
 
 # ----------------------------------------------------------------------
-# 4️⃣  Create a snapshot of the PostgreSQL volume
+# 7️⃣  Create a snapshot of the PostgreSQL volume
 # ----------------------------------------------------------------------
 SNAP_NAME="cqt-pg-$(date +%Y%m%d-%H%M%S)"
 log "info" "Creating snapshot '$SNAP_NAME' for volume $POSTGRES_VOLUME_ID"
@@ -118,17 +109,15 @@ SNAP_ID=$(doctl compute volume-action snapshot "$POSTGRES_VOLUME_ID" \
     --snapshot-name "$SNAP_NAME" \
     --format ID --no-header)
 
-if [[ -z "$SNAP_ID" ]]; then
-    die "Failed to create snapshot (empty ID returned)"
-fi
+[[ -n "$SNAP_ID" ]] || die "Failed to create snapshot (empty ID returned)"
 log "info" "Snapshot created: ID=$SNAP_ID, name=$SNAP_NAME"
 
 # ----------------------------------------------------------------------
-# 5️⃣  Prune old snapshots (keep only $RETENTION newest)
+# 8️⃣  Prune old snapshots (keep only $RETENTION newest)
 # ----------------------------------------------------------------------
 log "info" "Pruning snapshots – retaining the latest $RETENTION"
 
-# Get a list of snapshots for this volume, sorted newest→oldest
+# List snapshots for this volume, newest → oldest
 SNAP_LIST=$(doctl compute snapshot list \
     --resource-type volume \
     --format ID,Name,CreatedAt \
@@ -136,34 +125,30 @@ SNAP_LIST=$(doctl compute snapshot list \
     grep "$POSTGRES_VOLUME_ID" | \
     sort -k3 -r)
 
-# Counter for how many we have kept so far
 kept=0
-
 while IFS= read -r line; do
-    snap_id=$(echo "$line" | awk '{print $1}')
-    snap_name=$(echo "$line" | awk '{print $2}')
+    snap_id=$(awk '{print $1}' <<<"$line")
+    snap_name=$(awk '{print $2}' <<<"$line")
     ((kept++))
     if (( kept > RETENTION )); then
         log "info" "Deleting old snapshot $snap_name (ID=$snap_id)"
-        doctl compute snapshot delete "$snap_id" --force >/dev/null 2>&1 || \
-            log "warn" "Failed to delete snapshot $snap_id (may have already been removed)"
+        doctl compute snapshot delete "$snap_id" --force >/dev/null 2>&1 \
+            || log "warn" "Failed to delete snapshot $snap_id (may have already been removed)"
     fi
-done <<< "$SNAP_LIST"
+done <<<"$SNAP_LIST"
 
 log "info" "Snapshot pruning complete."
 
 # ----------------------------------------------------------------------
-# 6️⃣  Archive CQT log files and upload to Spaces
+# 9️⃣  Archive CQT log files and upload to Spaces
 # ----------------------------------------------------------------------
 log "info" "Archiving CQT logs from $LOG_DIR"
 
 ARCHIVE_NAME="cqt-logs-$(date +%Y%m%d-%H%M%S).tar.gz"
 ARCHIVE_PATH="${TMPDIR}/${ARCHIVE_NAME}"
 
-# Create the tar.gz archive (exclude anything that is not a CQT log)
-tar -czf "$ARCHIVE_PATH" -C "$LOG_DIR" $(ls $LOG_GLOB 2>/dev/null || true)
-
-if [[ ! -s "$ARCHIVE_PATH" ]]; then
+# Build the tar.gz archive (ignore missing files)
+if ! tar -czf "$ARCHIVE_PATH" -C "$LOG_DIR" $(ls $LOG_GLOB 2>/dev/null || true); then
     log "warn" "No log files matched pattern $LOG_GLOB – skipping upload"
 else
     log "info" "Uploading log archive to Spaces bucket $SPACES_BUCKET"
@@ -177,36 +162,27 @@ else
 fi
 
 # ----------------------------------------------------------------------
-# 7️⃣  (Optional) Archive new PostgreSQL WAL files
+# 🔟  (Optional) Archive new PostgreSQL WAL files
 # ----------------------------------------------------------------------
-# This step assumes you have WAL archiving enabled in postgresql.conf:
-#   archive_mode = on
-#   archive_command = 'aws --endpoint-url=https://nyc3.digitaloceanspaces.com s3 cp %p s3://cqt-wal-archive/%f'
-# The command below simply mirrors that behaviour for any WAL files that
-# have not yet been uploaded (it looks in the pg_wal directory inside the
-# mounted volume).
+# Adjust WAL_DIR if you mount the PostgreSQL volume elsewhere.
+WAL_DIR="/mnt/pg_wal"
 
-WAL_DIR="/mnt/pg_wal"   # Adjust if you mount the volume elsewhere
 if [[ -d "$WAL_DIR" ]]; then
     log "info" "Scanning for new WAL files in $WAL_DIR"
     for wal_file in "$WAL_DIR"/*; do
-        # Skip if it's not a regular file
-        [[ -f "$wal_file" ]] || continue
-
-        # Derive the remote object name (just the filename)
+        [[ -f "$wal_file" ]] || continue               # skip non‑regular files
         wal_name=$(basename "$wal_file")
 
-        # Check if the file already exists in the bucket
+        # Skip if already present in the bucket
         if AWS_ACCESS_KEY_ID="$SPACES_KEY" \
            AWS_SECRET_ACCESS_KEY="$SPACES_SECRET" \
            aws s3 ls "s3://${SPACES_BUCKET}/wal/${wal_name}" \
                --endpoint-url "https://${SPACES_ENDPOINT}" \
                >/dev/null 2>&1; then
-            log "debug" "WAL $wal_name already present in bucket – skipping"
+            log "debug" "WAL $wal_name already present – skipping"
             continue
         fi
 
-        # Upload the WAL file
         log "info" "Uploading WAL $wal_name to bucket"
         AWS_ACCESS_KEY_ID="$SPACES_KEY" \
         AWS_SECRET_ACCESS_KEY="$SPACES_SECRET" \
@@ -221,10 +197,10 @@ else
 fi
 
 # ----------------------------------------------------------------------
-# 8️⃣  Cleanup
+# 1️⃣1️⃣  Cleanup temporary workspace
 # ----------------------------------------------------------------------
-log "info" "Cleaning up temporary files"
+log "info" "Removing temporary directory $TMPDIR"
 rm -rf "$TMPDIR"
 
 log "info" "cqt_backup.sh completed successfully"
-exit 0
+exit 0   # <-- explicit exit for SonarQube (function already ended)
