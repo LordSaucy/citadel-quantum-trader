@@ -40,6 +40,20 @@ volumes:
   admin_backend:      {}   # FastAPI backend (static files are copied here)
   sentinel:           {}   # Empty volume used only for “stop_grace_period”
 
+ admin-cron:
+    build:
+      context: .
+      dockerfile: admin_ui/cron/Dockerfile
+    container_name: cqt-admin-cron
+    restart: unless-stopped
+    env_file: [.env]
+    secrets:
+      - POSTGRES_PASSWORD
+    depends_on:
+      - db
+    networks:
+      - cqt-net
+
 # ======================================================================
 #  SERVICES
 # ======================================================================
@@ -90,24 +104,23 @@ services:
 #  2️⃣  POSTGRESQL / TIMESCALEDB (immutable ledger)
 # ----------------------------------------------------------------------
   db:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-yourorg}/cqt-db:${IMAGE_TAG:-latest}
+    image: postgres:15
     container_name: cqt-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: citadel
       POSTGRES_DB: citadel
-      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD
-    secrets:
-      - POSTGRES_PASSWORD
+      POSTGRES_PASSWORD_FILE: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
-      - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+        pg_data:
     command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
     networks:
       - cqt-net
+       cqt-net:
+    driver: bridge
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "citadel"]
       interval: 10s
@@ -222,8 +235,6 @@ services:
     networks:
       - cqt-net
 
-    
-
 # ----------------------------------------------------------------------
 #  8️⃣  NGINX REVERSE‑PROXY (TLS termination for public endpoints)
 # ----------------------------------------------------------------------
@@ -246,23 +257,22 @@ services:
 # ----------------------------------------------------------------------
 #  9️⃣  ADMIN UI – FastAPI backend (exposes /api/*)
 # ----------------------------------------------------------------------
-  admin-backend:
+     admin-api:
     build:
-      context: ./admin_ui/backend
-      dockerfile: Dockerfile
-    container_name: cqt-admin-backend
+      context: .
+      dockerfile: admin_ui/backend/Dockerfile
+      
+    container_name: cqt-admin-api
     restart: unless-stopped
     env_file: [.env]
     secrets:
       - CQT_API_TOKEN
     ports:
-      - "8006:8000"                       # internal only; LB does not expose it
-    volumes:
-      - admin_backend:/app/static          # static files served by FastAPI
+      - "8000:8000"                       # internal only; LB does not expose it
     networks:
       - cqt-net
     depends_on:
-      - engine
+      - db
 
 # ----------------------------------------------------------------------
 #  🔟  ADMIN UI – Vite SPA (built into `admin_backend` static dir)
