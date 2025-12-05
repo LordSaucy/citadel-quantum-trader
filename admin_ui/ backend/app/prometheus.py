@@ -1,5 +1,5 @@
 from prometheus_api_client import PrometheusConnect
-import datetime
+from datetime import datetime, timezone
 
 PROM_URL = "http://prometheus:9090"
 pc = PrometheusConnect(url=PROM_URL, disable_ssl=True)
@@ -11,7 +11,7 @@ def query_drawdown(start: str = None, end: str = None):
     If start/end omitted, defaults to last 7 days.
     """
     if not start:
-        start = (datetime.datetime.utcnow() - datetime.timedelta(days=7)).isoformat()
+        start = (datetime.datetime.utcnow(datetime.timezone.utc) - datetime.timedelta(days=7)).isoformat()
     if not end:
         end = datetime.datetime.utcnow().isoformat()
 
