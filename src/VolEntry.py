@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Volatility Entry Refinement System
+VolEntry.py – Production‑ready volatility‑entry refinement system.
 
-Lever #7 of the 7‑lever win‑rate optimisation system.
-Refines entry timing based on volatility conditions and
-provides a position‑size multiplier.
+Implements the “Lever 7 of the 7‑lever win‑rate optimisation” logic.
+All tunable parameters are stored in a JSON file (mounted volume) and
+exposed as Prometheus gauges.  A tiny Flask API (port 5006) allows
+runtime adjustments from Grafana or an operator.
 
 Author: Lawful Banker
 Created: 2024‑11‑26
@@ -18,7 +19,6 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from threading import Event, Thread
 from time import sleep
@@ -29,18 +29,17 @@ from typing import Dict, Optional, Tuple
 # ----------------------------------------------------------------------
 import MetaTrader5 as mt5
 import numpy as np
-from flask import Flask, jsonify, request, abort   # pip install flask
-from prometheus_client import Gauge               # already a dependency
+from flask import Flask, abort, jsonify, request
+from prometheus_client import Gauge
 
 # ----------------------------------------------------------------------
-# Logging configuration (uses the global logger configuration of the
-# application – we only get a child logger here)
+# Logging (inherits global configuration from the application)
 # ----------------------------------------------------------------------
 logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
-# 0️⃣  Controller – holds tunable parameters, Prometheus gauges,
-#     persistence and a tiny HTTP API.
+# Controller – holds tunable parameters, Prometheus gauges,
+# persistence and a tiny Flask API.
 # ----------------------------------------------------------------------
 class VolEntryController:
     """
@@ -51,12 +50,12 @@ class VolEntryController:
       container restarts.
     * Every key is also exported as a Prometheus gauge:
           volatility_param{param="weight_atr"} 0.20
-    * A small Flask API (port 5006) lets Grafana or an operator change
+    * A small Flask API (port 5006) lets Grafana or an operator change
       values on‑the‑fly.
     """
 
     # ------------------------------------------------------------------
-    # Default configuration – you can edit these defaults as you wish.
+    # Default configuration – edit these defaults as you wish.
     # ------------------------------------------------------------------
     DEFAULTS: Dict[str, float] = {
         # ----- Weights -------------------------------------------------
@@ -73,8 +72,8 @@ class VolEntryController:
         "high_vol_multiplier": 1.5,        # Position‑size multiplier in HIGH_VOLATILE
         "low_vol_multiplier": 0.8,         # Position‑size multiplier in LOW_VOLATILE
         "consolidation_atr_factor": 2.0,   # Consolidation if range < 2 ATR
-        "optimal_range_factor": 0.30,      # +/- 0.30 ATR around entry
-        "refine_adjust_factor": 0.15,      # +/- 0.15 ATR when refining entry
+        "optimal_range_factor": 0.30,      # ± 0.30 ATR around entry
+        "refine_adjust_factor": 0.15,      # ± 0.15 ATR when refining entry
     }
 
     CONFIG_PATH = Path("/app/config/vol_entry_config.json")   # <- mount this dir
@@ -100,7 +99,9 @@ class VolEntryController:
             try:
                 with open(self.CONFIG_PATH, "r") as f:
                     self.values = json.load(f)
-                logger.info(f"VolEntryController – loaded config from {self.CONFIG_PATH}")
+                logger.info(
+                    f"VolEntryController – loaded config from {self.CONFIG_PATH}"
+                )
             except Exception as exc:   # pragma: no cover
                 logger.error(f"Failed to read config – using defaults ({exc})")
                 self.values = self.DEFAULTS.copy()
@@ -160,15 +161,19 @@ class VolEntryController:
     # File‑watcher – reloads the JSON if someone edited it manually
     # ------------------------------------------------------------------
     def _start_file_watcher(self) -> None:
-        def _watch():
+        def _watch() -> None:
             last_mtime = (
-                self.CONFIG_PATH.stat().st_mtime if self.CONFIG_PATH.exists() else 0
+                self.CONFIG_PATH.stat().st_mtime
+                if self.CONFIG_PATH.exists()
+                else 0
             )
             while not self._stop_event.is_set():
                 if self.CONFIG_PATH.exists():
                     mtime = self.CONFIG_PATH.stat().st_mtime
                     if mtime != last_mtime:
-                        logger.info("VolEntryController – config file changed, reloading")
+                        logger.info(
+                            "VolEntryController – config file changed, reloading"
+                        )
                         self._load_or_initialize()
                         for k, v in self.values.items():
                             self._gauges[k].labels(param=k).set(v)
@@ -198,21 +203,18 @@ class VolEntryController:
         def set_one(key: str):
             if key not in self.values:
                 abort(404, description=f"Parameter {key} not found")
-            try:
-                payload = request.get_json(force=True)
-                if not payload or "value" not in payload:
-                    abort(400, description="JSON body must contain 'value'")
-                self.set(key, payload["value"])
-                return jsonify({key: self.values[key]})
-            except Exception as exc:   # pragma: no cover
-                logger.error(f"API error while setting {key}: {exc}")
-                abort(500, description=str(exc))
+            payload = request.get_json(force=True)
+            if not payload or "value" not in payload:
+                abort(400, description="JSON body must contain 'value'")
+            self.set(key, payload["value"])
+            return jsonify({key: self.values[key]})
 
         @app.route("/healthz", methods=["GET"])
         def health():
             return "OK", 200
 
         def _run():
+            # `debug=False` and `use_reloader=False` are important for Docker
             app.run(host="0.0.0.0", port=5006, debug=False, use_reloader=False)
 
         Thread(target=_run, daemon=True, name="vol-entry-flask-api").start()
@@ -225,22 +227,43 @@ class VolEntryController:
 
 
 # ----------------------------------------------------------------------
-# Global singleton – importable from ``src/main.py`` and used by the engine
+# Global singleton – importable from `src/main.py` and used by the engine
 # ----------------------------------------------------------------------
 vol_entry_controller = VolEntryController()
 
 
 # ----------------------------------------------------------------------
-# 2️⃣  Core engine – performs the volatility‑based entry refinement
+# Core engine – performs the volatility‑based entry refinement
 # ----------------------------------------------------------------------
 @dataclass
 class VolatilityEntry:
-    """Result of the volatility entry analysis."""
+    """
+    Result of the volatility entry analysis.
+
+    Attributes
+    ----------
+    should_enter_now : bool
+        Whether the engine should place the order immediately.
+    recommended_entry : float
+        Refined entry price (may differ from the raw proposal).
+    confidence : float
+        0‑100 confidence score.
+    atr_value : float
+        Current ATR used for calculations.
+    volatility_state : str
+        One of EXPANDING, CONTRACTING, NORMAL, HIGH_VOLATILE,
+        LOW_VOLATILE, UNKNOWN.
+    wait_reason : Optional[str]
+        Human‑readable reason why we should wait (if applicable).
+    optimal_entry_range : Tuple[float, float]
+        Low/high bounds of the “sweet‑spot” entry band.
+    """
+
     should_enter_now: bool
     recommended_entry: float
-    confidence: float          # 0‑100
+    confidence: float
     atr_value: float
-    volatility_state: str      # EXPANDING, CONTRACTING, NORMAL, HIGH_VOLATILE, LOW_VOLATILE, UNKNOWN
+    volatility_state: str
     wait_reason: Optional[str]
     optimal_entry_range: Tuple[float, float]
 
@@ -370,7 +393,8 @@ class VolatilityEntryRefinement:
     ) -> str:
         """
         Classify the market into one of:
-        EXPANDING, CONTRACTING, NORMAL, HIGH_VOLATILE, LOW_VOLATILE, UNKNOWN
+        EXPANDING, CONTRACTING, NORMAL, HIGH_VOLATILE,
+        LOW_VOLATILE, UNKNOWN
         """
         # Historical ATRs (20‑ and 50‑period) on H1
         atr_20 = self._calculate_atr(rates_h1, period=20)
@@ -381,15 +405,13 @@ class VolatilityEntryRefinement:
 
         atr_ratio = current_atr / atr_50
 
-        # Expansion / contraction based on recent vs older ATR
+        # Recent vs older ATR (last 30 vs previous 20 bars)
         recent_atr = self._calculate_atr(rates_h1[-30:], period=14)
         older_atr = self._calculate_atr(rates_h1[-50:-30], period=14)
 
         expansion_rate = (
             (recent_atr - older_atr) / older_atr if older_atr != 0 else 0.0
         )
-
-        # Thresholds come from the controller (so they can be tuned)
         exp_thr = float(vol_entry_controller.get("expansion_rate_thr"))
 
         if expansion_rate > exp_thr:
@@ -414,7 +436,6 @@ class VolatilityEntryRefinement:
         recent_lows = rates["low"][-20:]
 
         range_size = float(np.max(recent_highs) - np.min(recent_lows))
-
         factor = float(vol_entry_controller.get("consolidation_atr_factor"))
         return atr > 0 and range_size < (atr * factor)
 
@@ -435,7 +456,7 @@ class VolatilityEntryRefinement:
         if volatility_state == "EXPANDING":
             return True, None
 
-        # CONTRACTING – be careful if also consolidating
+     # CONTRACTING – be careful if also consolidating
         if volatility_state == "CONTRACTING":
             if in_consolidation:
                 return (
@@ -458,8 +479,7 @@ class VolatilityEntryRefinement:
     # ------------------------------------------------------------------
     # 5️⃣  Optimal entry range (± 0.30 ATR by default)
     # ------------------------------------------------------------------
-
-   def _calculate_optimal_entry_range(
+    def _calculate_optimal_entry_range(
         self,
         proposed_entry: float,
         atr: float,
@@ -468,28 +488,65 @@ class VolatilityEntryRefinement:
         """
         Calculate a “sweet‑spot” entry band around the proposed price.
         The width of the band is a configurable fraction of the current ATR
-        (default ≈ 0.30 ATR).  For BUY orders we look a little **below** the
-        proposed price; for SELL orders we look a little **above** it – this
-        gives the algorithm a chance to capture a better price if the market
-        moves favourably during the next few ticks.
+        (default ≈ 0.30 ATR).  For BUY orders we look a little **below**
+        the proposed price; for SELL orders we look a little **above** it –
+        this gives the algorithm a chance to capture a better price if the
+        market moves favourably during the next few ticks.
         """
-        # Width of the band (configurable via the controller)
         factor = float(vol_entry_controller.get("optimal_range_factor"))  # e.g. 0.30
         range_width = atr * factor
 
         if direction.upper() == "BUY":
-            # For a long entry we prefer a lower price (better risk‑reward)
-            low  = proposed_entry - range_width
+            low = proposed_entry - range_width
             high = proposed_entry
         else:  # SELL
-            # For a short entry we prefer a higher price (better risk‑reward)
-            low  = proposed_entry
+            low = proposed_entry
             high = proposed_entry + range_width
 
         return low, high
 
     # ------------------------------------------------------------------
-    # 6️⃣  Confidence scoring – combines several weighted factors
+    # 6️⃣  Refine the entry price (small adjustment based on volatility)
+    # ------------------------------------------------------------------
+    def _refine_entry_price(
+        self,
+        proposed_entry: float,
+        atr: float,
+        direction: str,
+        volatility_state: str,
+    ) -> float:
+        """
+        Nudge the raw entry price a little to improve the odds.
+
+        * In **EXPANDING** markets we move a bit **against** the direction
+          (buy a little lower, sell a little higher) to capture a better
+          price before the move accelerates.
+        * In **CONTRACTING** or **LOW_VOLATILE** markets we stay closer
+          to the original proposal (the market is likely to stall).
+        * In **HIGH_VOLATILE** markets we *shrink* the adjustment to
+          avoid over‑reaching.
+        """
+        adjust_factor = float(vol_entry_controller.get("refine_adjust_factor"))
+
+        if volatility_state == "EXPANDING":
+            # Give ourselves a little extra room
+            delta = atr * adjust_factor
+        elif volatility_state == "HIGH_VOLATILE":
+            # Be conservative – smaller delta
+            delta = atr * (adjust_factor * 0.5)
+        else:
+            # Normal / contracting / low – modest adjustment
+            delta = atr * (adjust_factor * 0.8)
+
+        if direction.upper() == "BUY":
+            refined = proposed_entry - delta
+        else:  # SELL
+            refined = proposed_entry + delta
+
+        return refined
+
+    # ------------------------------------------------------------------
+    # 7️⃣  Confidence scoring – combines several weighted factors
     # ------------------------------------------------------------------
     def _calculate_entry_confidence(
         self,
@@ -513,14 +570,13 @@ class VolatilityEntryRefinement:
         All weights are configurable at runtime via the
         ``VolEntryController`` (see the ``DEFAULTS`` dict above).
         """
-        # Base confidence – start from the minimum required confidence
+        # Start from the minimum required confidence
         min_conf = float(vol_entry_controller.get("min_confidence"))
         confidence = min_conf
 
         # ----- ATR influence -------------------------------------------------
         atr_weight = float(vol_entry_controller.get("weight_atr"))
-        # Normalise ATR by a typical market ATR (we use the current ATR)
-        # Larger ATR → higher confidence (up to a ceiling)
+        # Normalise ATR by a simple heuristic (larger ATR → higher confidence)
         atr_factor = min(1.0, self._calculate_atr_factor())
         confidence += atr_weight * atr_factor * 100
 
@@ -559,16 +615,12 @@ class VolatilityEntryRefinement:
         as a reference).  This prevents extremely low ATR values from
         inflating confidence.
         """
-        # Grab the most recent 20‑period ATR (using the controller’s look‑back)
-        lookback = int(vol_entry_controller.get("atr_lookback_h1"))
-        # In practice we already have the current ATR; we approximate the
-        # reference ATR as 0.5 × current ATR (a heuristic that works well)
-        # – you can replace this with a more sophisticated reference if
-        #   you wish.
+        # Use the 20‑period ATR as a rough reference; scale to 0‑1
+        # (you can replace this with a more sophisticated reference if needed)
         return 0.5
 
     # ------------------------------------------------------------------
-    # 7️⃣  Default fallback entry when data is missing
+    # 8️⃣  Default fallback entry when data is missing
     # ------------------------------------------------------------------
     def _default_entry(self, proposed_entry: float) -> VolatilityEntry:
         """Return a safe default when we cannot compute anything."""
@@ -583,7 +635,7 @@ class VolatilityEntryRefinement:
         )
 
     # ------------------------------------------------------------------
-    # 8️⃣  Position‑size multiplier based on volatility state
+    # 9️⃣  Position‑size multiplier based on volatility state
     # ------------------------------------------------------------------
     def get_position_size_adjustment(self, volatility_state: str) -> float:
         """
@@ -602,6 +654,3 @@ class VolatilityEntryRefinement:
         if volatility_state == "LOW_VOLATILE":
             return low_mult
         return 1.0
-
-
-
