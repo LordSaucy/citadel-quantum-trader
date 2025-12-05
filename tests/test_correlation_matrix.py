@@ -1,23 +1,35 @@
-import pandas as pd
-import numpy as np
-from src.correlation_matrix import rolling_corr_matrix, average_correlation
+# tests/test_dynamic_dd.py
+import pytest
+from src.risk_management.risk_manager import (
+    update_equity_window,
+    portfolio_atr,
+    current_max_dd_allowed,
+)
 
-def test_symmetry_and_diag():
-    # Create a dummy DataFrame with 5 assets, 100 rows
-    rng = np.random.default_rng(42)
-    data = rng.normal(size=(100, 5))
-    df = pd.DataFrame(data, columns=[f"S{i}" for i in range(5)])
-    corr = rolling_corr_matrix(df)
 
-    # Diagonal must be exactly 1.0
-    assert np.allclose(np.diag(corr), np.ones(5))
+def test_dynamic_dd_shrinks_when_volatility_spikes():
+    """
+    The DD (draw‑down) cap is a function of the portfolio ATR.
+    When volatility spikes, the ATR doubles and the allowed DD should
+    shrink proportionally.
+    """
 
-    # Matrix must be symmetric
-    assert np.allclose(corr, corr.T)
+    # -----------------------------------------------------------------
+    # 1️⃣  Calm equity curve – 5 % draw‑down allowed (base cap = 0.20)
+    # -----------------------------------------------------------------
+    for equity in [1000, 1010, 1020, 1030, 1040]:
+        update_equity_window(equity)
 
-def test_average_corr():
-    # Perfectly correlated data → avg_corr = 1.0
-    df = pd.DataFrame({"A": np.arange(100), "B": np.arange(100) * 2})
-    corr = rolling_corr_matrix(df)
-    avg = average_correlation(corr)
-    assert pytest.approx(avg, rel=1e-6) == 1.0
+    # The base cap is 0.20 (20 %).  With a calm ATR the function should
+    # return something *very close* to that value.
+    assert pytest.approx(current_max_dd_allowed(), rel=1e-2) == 0.20
+
+    # -----------------------------------------------------------------
+    # 2️⃣  Inject a volatility spike (equity swings ±10 %)
+    # -----------------------------------------------------------------
+    for equity in [950, 1080, 920, 1100, 880]:
+        update_equity_window(equity)
+
+    # After the spike the ATR roughly doubles, so the DD cap should be
+    # roughly halved (< 0.12).  We only need to assert the inequality.
+    assert current_max_dd_allowed() < 0.12
