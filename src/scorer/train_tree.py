@@ -3,7 +3,7 @@ import xgboost as xgb
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-df = pd.read_csv('data/training_features.csv')   # columns = levers + target
+df = pd.read_csv('data/training_features.csv')   
 X = df.drop(columns=['target'])
 y = df['target']
 
