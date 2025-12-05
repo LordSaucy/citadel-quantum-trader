@@ -8,6 +8,7 @@ Only the fields required for a “transaction‑level” report are populated.
 import os, datetime, xml.etree.ElementTree as ET
 import psycopg2
 from report_utils import upload_encrypted
+from datetime import datetime, timezone
 
 DB_DSN = os.getenv('POSTGRES_DSN')   # e.g. "dbname=citadel user=citadel password=… host=postgres"
 TODAY = datetime.date.today().isoformat()
@@ -29,7 +30,7 @@ def fetch_transactions():
     return rows
 
 def build_sftr_xml(trades):
-    root = ET.Element('SFTRReport', attrib={'creationDateTime': datetime.datetime.utcnow().isoformat()})
+    root = ET.Element('SFTRReport', attrib={'creationDateTime': datetime.datetime.utcnow(datetime.timezone.utc).isoformat()})
     for tr in trades:
         tx = ET.SubElement(root, 'Transaction')
         ET.SubElement(tx, 'BucketID').text = str(tr['bucket_id'])
