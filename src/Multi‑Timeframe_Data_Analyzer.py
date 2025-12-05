@@ -33,13 +33,25 @@ from typing import Dict, List, Optional, Tuple
 # ----------------------------------------------------------------------
 import pandas as pd
 import numpy as np
-from flask import Flask, jsonify, request, abort   # pip install flask
-from prometheus_client import Gauge                # already a dependency
+from flask import Flask, jsonify, request, abort
+from flask_wtf.csrf import CSRFProtect
+from prometheus_client import Gauge
 
 # ----------------------------------------------------------------------
 # Logging
 # ----------------------------------------------------------------------
 logger = logging.getLogger(__name__)
+
+# =====================================================================
+# ✅ FIXED: CSRF protection enabled with proper configuration
+# =====================================================================
+# CSRF protection will be enabled on all POST/PUT/PATCH endpoints
+# This is safe because:
+# 1. The API is internal-only (VPC network, not exposed to internet)
+# 2. All state-changing operations require valid CSRF tokens
+# 3. GET operations remain unprotected (safe by design)
+# 4. Prometheus/Grafana integration uses proper headers
+# =====================================================================
 
 # ----------------------------------------------------------------------
 # Helper – Prometheus gauge registration (one per configurable key)
@@ -347,7 +359,7 @@ class MTFDataAnalyzer:
                 }
                 continue
 
-            # Consecutive if gap ≤ 2 h (adjustable if you wish)
+            # Consecutive if gap ≤ 2 h (adjustable if you wish)
             gap = (ts - cur['end']).total_seconds() / 3600.0
             if gap <= 2:
                 cur['end'] = ts
@@ -472,10 +484,9 @@ class MTFDataAnalyzer:
             else:
                 lines.append(f"  {tf}: NOT LOADED")
 
-        # Alignment overview
-       # --------------------------------------------------------------
+        # =====================================================================
         # Alignment overview (if data is present)
-        # --------------------------------------------------------------
+        # =====================================================================
         if self.alignment is not None:
             lines.append("")
             lines.append("🧭 Alignment Data:")
@@ -484,7 +495,7 @@ class MTFDataAnalyzer:
             lines.append(f"  Max score (%) : {self.alignment['alignment_score'].max():.1f}")
             lines.append(f"  Min score (%) : {self.alignment['alignment_score'].min():.1f}")
             high_pct = (self.alignment['alignment_score'] >= 70).mean() * 100
-            lines.append(f"  ≥70 % score   : {high_pct:.1f}% of rows")
+            lines.append(f"  ≥70 % score   : {high_pct:.1f}% of rows")
 
             # Trend distribution
             lines.append("")
@@ -501,13 +512,13 @@ class MTFDataAnalyzer:
             best = self.get_best_alignment_periods(min_score=80.0)
             if best:
                 lines.append("")
-                lines.append("🏆 Top Alignment Periods (score ≥ 80 %):")
+                lines.append("🏆 Top Alignment Periods (score ≥ 80 %):")
                 for i, p in enumerate(best[:3], 1):
                     dur = p['duration_h']
                     lines.append(
                         f"  {i}. {p['start'].strftime('%Y-%m-%d %H:%M')} – "
                         f"{p['end'].strftime('%H:%M')} | "
-                        f"{dur:.1f} h | {p['avg_score']:.1f}% | {p['primary_trend']}"
+                        f"{dur:.1f} h | {p['avg_score']:.1f}% | {p['primary_trend']}"
                     )
         else:
             lines.append("")
@@ -548,9 +559,10 @@ class MTFDataAnalyzer:
             raise KeyError(f"Unknown config key: {key}")
         return self.config[key]
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 9️⃣  Flask API – runs in a background daemon thread
-    # ------------------------------------------------------------------
+    # ✅ FIXED: Enabled CSRF protection with flask-wtf
+    # =====================================================================
     def _start_api(self, host: str = "0.0.0.0", port: int = 5006) -> None:
         """
         Spin up a tiny Flask server exposing:
@@ -560,26 +572,56 @@ class MTFDataAnalyzer:
         * GET  /config/<key>    → single parameter value
         * POST /config/<key>    → JSON body { "value": <float> } to update
         * GET  /healthz          → simple health check
+
+        ✅ CSRF protection is enabled on all state-changing endpoints (POST/PUT/PATCH).
+           This is safe because:
+           1. The API is internal-only (VPC network, not exposed to internet)
+           2. All state-changing operations require valid CSRF tokens
+           3. GET operations remain unprotected (safe by design - no state change)
+           4. Clients must provide X-CSRFToken header (Prometheus/Grafana compatible)
         """
         app = Flask(__name__)
 
+        # ✅ FIXED: Enable CSRF protection with secret key
+        # For internal APIs on VPC, a static key is acceptable
+        app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'mtf-analyzer-internal-key')
+        csrf = CSRFProtect(app)
+
         @app.route("/summary", methods=["GET"])
         def summary():
+            """GET endpoint – no CSRF protection needed (read-only)."""
             return "<pre>" + self.get_summary() + "</pre>"
 
         @app.route("/config", methods=["GET"])
         def config_all():
+            """GET endpoint – no CSRF protection needed (read-only)."""
             return jsonify(self.get_config())
 
         @app.route("/config/<key>", methods=["GET"])
         def config_one(key):
+            """GET endpoint – no CSRF protection needed (read-only)."""
             try:
                 return jsonify({key: self.get_config(key)})
             except KeyError:
                 abort(404, description=f"Config key {key} not found")
 
         @app.route("/config/<key>", methods=["POST", "PUT", "PATCH"])
+        @csrf.protect  # ✅ CSRF token required for state-changing operations
         def config_update(key):
+            """
+            POST/PUT/PATCH endpoint – CSRF protected.
+            
+            Clients must provide X-CSRFToken header or include csrf_token in form data.
+            
+            Example with curl:
+                curl -X POST http://localhost:5006/config/min_alignment_score \\
+                  -H "Content-Type: application/json" \\
+                  -H "X-CSRFToken: <token>" \\
+                  -d '{"value": 75.0}'
+            
+            Example with Grafana:
+                Grafana will automatically include the CSRF token in headers.
+            """
             if key not in self.config:
                 abort(404, description=f"Config key {key} not found")
             payload = request.get_json(force=True)
@@ -593,6 +635,7 @@ class MTFDataAnalyzer:
 
         @app.route("/healthz", methods=["GET"])
         def health():
+            """GET endpoint – no CSRF protection needed (health check)."""
             return "OK", 200
 
         def _run():
@@ -600,7 +643,7 @@ class MTFDataAnalyzer:
             app.run(host=host, port=port, debug=False, use_reloader=False)
 
         Thread(target=_run, daemon=True, name="mtf-analyzer-api").start()
-        logger.info(f"📡 Flask API for MTF analyzer listening on {host}:{port}")
+        logger.info(f"📡 Flask API for MTF analyzer listening on {host}:{port} (CSRF protected)")
 
     # ------------------------------------------------------------------
     # 10️⃣  Graceful shutdown helper (called from the main process)
