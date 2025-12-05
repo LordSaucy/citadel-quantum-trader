@@ -8,7 +8,7 @@ router = APIRouter(tags=["health"])
 @router.get("/healthz", response_model=dict)
 async def healthz():
     """Lightweight health check for the load balancer."""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat() + "Z"}
+    return {"status": "ok", "timestamp": datetime.now().isoformat() + "Z"}
 
 @router.get("/ready", response_model=dict, dependencies=[Depends(get_current_user)])
 async def ready():
