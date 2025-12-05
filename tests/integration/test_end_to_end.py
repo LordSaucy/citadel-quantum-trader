@@ -4,7 +4,7 @@ import time
 
 @pytest.mark.integration
 def test_full_workflow(mt5_sandbox):
-    container, host_port = mt5_sandbox
+    "_", host_port = mt5_sandbox
     # The sandbox exposes an HTTP API that mimics the MT5 broker.
     # We'll start the bot pointing at this sandbox and verify a trade occurs.
 
