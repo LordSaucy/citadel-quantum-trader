@@ -288,7 +288,7 @@ class BacktestReporter:
         pdf.ln(10)
 
         pdf.set_font("Helvetica", "", 12)
-        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
         pdf.cell(0, 10, f"Generated on: {now_str}", ln=True, align="C")
         pdf.ln(20)
 
