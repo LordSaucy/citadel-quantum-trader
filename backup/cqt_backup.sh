@@ -23,9 +23,9 @@
 
 set -euo pipefail
 
-# ----------------------------------------------------------------------
-# 0️⃣  Helper: read a secret (Docker secret → env var fallback)
-# ----------------------------------------------------------------------
+# =====================================================================
+# Helper: read a secret (Docker secret → env var fallback)
+# =====================================================================
 read_secret() {
     local secret_name="$1"   # Docker‑secret file name (e.g. DO_TOKEN)
     local env_name="$2"      # Corresponding environment variable name
@@ -40,17 +40,17 @@ read_secret() {
     return 0                     # <-- explicit return for SonarQube
 }
 
-# ----------------------------------------------------------------------
-# 1️⃣  Configuration (override via env vars or Docker secrets)
-# ----------------------------------------------------------------------
+# =====================================================================
+# Configuration (override via env vars or Docker secrets)
+# =====================================================================
 DO_TOKEN="$(read_secret DO_TOKEN DO_TOKEN)"
 SPACES_KEY="$(read_secret SPACES_KEY SPACES_KEY)"
 SPACES_SECRET="$(read_secret SPACES_SECRET SPACES_SECRET)"
 POSTGRES_VOLUME_ID="$(read_secret POSTGRES_VOLUME_ID POSTGRES_VOLUME_ID)"
 
-# ----------------------------------------------------------------------
-# 2️⃣  Operational parameters (tweak as needed)
-# ----------------------------------------------------------------------
+# =====================================================================
+# Operational parameters (tweak as needed)
+# =====================================================================
 RETENTION=7                                 # keep the N newest snapshots
 SPACES_BUCKET="cqt-backups"                # must already exist
 SPACES_ENDPOINT="nyc3.digitaloceanspaces.com"
@@ -58,9 +58,9 @@ LOG_DIR="/var/log"
 LOG_GLOB="cqt*.log*"                       # pattern for CQT logs
 TMPDIR="$(mktemp -d -t cqt_backup_XXXXXX)" # temporary working dir
 
-# ----------------------------------------------------------------------
-# 3️⃣  Helper: structured logging (writes to syslog & local file)
-# ----------------------------------------------------------------------
+# =====================================================================
+# Helper: structured logging (writes to syslog & local file)
+# =====================================================================
 log() {
     local level="$1"   # e.g. info, warn, err, debug
     local msg="$2"
@@ -72,18 +72,20 @@ log() {
     return 0                     # <-- explicit return for SonarQube
 }
 
-# ----------------------------------------------------------------------
-# 4️⃣  Helper: fatal error (log + exit)
-# ----------------------------------------------------------------------
+# =====================================================================
+# ✅ FIXED: Helper - fatal error (log + exit)
+#           Added explicit return statement at end of function
+# =====================================================================
 die() {
     local errmsg="$1"
     log "err" "$errmsg"
-    exit 1                       # explicit exit (function never returns)
+    exit 1                       # exits entire script
+    return 1                     # <-- explicit return for SonarQube (unreachable but required)
 }
 
-# ----------------------------------------------------------------------
-# 5️⃣  Verify required binaries & environment variables
-# ----------------------------------------------------------------------
+# =====================================================================
+# Verify required binaries & environment variables
+# =====================================================================
 for cmd in doctl aws jq tar gzip; do
     command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' is not installed"
 done
@@ -93,15 +95,15 @@ done
 [[ -n "$SPACES_SECRET" ]]   || die "SPACES_SECRET not set"
 [[ -n "$POSTGRES_VOLUME_ID" ]] || die "POSTGRES_VOLUME_ID not set"
 
-# ----------------------------------------------------------------------
-# 6️⃣  Authenticate doctl (once per session)
-# ----------------------------------------------------------------------
+# =====================================================================
+# Authenticate doctl (once per session)
+# =====================================================================
 export DO_TOKEN
 doctl auth init -t "$DO_TOKEN" >/dev/null 2>&1
 
-# ----------------------------------------------------------------------
-# 7️⃣  Create a snapshot of the PostgreSQL volume
-# ----------------------------------------------------------------------
+# =====================================================================
+# Create a snapshot of the PostgreSQL volume
+# =====================================================================
 SNAP_NAME="cqt-pg-$(date +%Y%m%d-%H%M%S)"
 log "info" "Creating snapshot '$SNAP_NAME' for volume $POSTGRES_VOLUME_ID"
 
@@ -112,9 +114,9 @@ SNAP_ID=$(doctl compute volume-action snapshot "$POSTGRES_VOLUME_ID" \
 [[ -n "$SNAP_ID" ]] || die "Failed to create snapshot (empty ID returned)"
 log "info" "Snapshot created: ID=$SNAP_ID, name=$SNAP_NAME"
 
-# ----------------------------------------------------------------------
-# 8️⃣  Prune old snapshots (keep only $RETENTION newest)
-# ----------------------------------------------------------------------
+# =====================================================================
+# Prune old snapshots (keep only $RETENTION newest)
+# =====================================================================
 log "info" "Pruning snapshots – retaining the latest $RETENTION"
 
 # List snapshots for this volume, newest → oldest
@@ -139,9 +141,9 @@ done <<<"$SNAP_LIST"
 
 log "info" "Snapshot pruning complete."
 
-# ----------------------------------------------------------------------
-# 9️⃣  Archive CQT log files and upload to Spaces
-# ----------------------------------------------------------------------
+# =====================================================================
+# Archive CQT log files and upload to Spaces
+# =====================================================================
 log "info" "Archiving CQT logs from $LOG_DIR"
 
 ARCHIVE_NAME="cqt-logs-$(date +%Y%m%d-%H%M%S).tar.gz"
@@ -161,9 +163,9 @@ else
         log "err" "Failed to upload log archive to Spaces"
 fi
 
-# ----------------------------------------------------------------------
-# 🔟  (Optional) Archive new PostgreSQL WAL files
-# ----------------------------------------------------------------------
+# =====================================================================
+# (Optional) Archive new PostgreSQL WAL files
+# =====================================================================
 # Adjust WAL_DIR if you mount the PostgreSQL volume elsewhere.
 WAL_DIR="/mnt/pg_wal"
 
@@ -196,9 +198,9 @@ else
     log "warn" "WAL directory $WAL_DIR not found – skipping WAL archiving"
 fi
 
-# ----------------------------------------------------------------------
-# 1️⃣1️⃣  Cleanup temporary workspace
-# ----------------------------------------------------------------------
+# =====================================================================
+# Cleanup temporary workspace
+# =====================================================================
 log "info" "Removing temporary directory $TMPDIR"
 rm -rf "$TMPDIR"
 
