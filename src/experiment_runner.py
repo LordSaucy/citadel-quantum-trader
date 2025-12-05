@@ -28,7 +28,7 @@ def wait_for_trades(target_trades=5000, poll_interval=5):
         ctrl = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM exp.trades")
         exp = cur.fetchone()[0]
-        print(f"[{datetime.utcnow()}] control={ctrl}, variant={exp}")
+        print(f"[{datetime.now()}] control={ctrl}, variant={exp}")
         if ctrl >= target_trades and exp >= target_trades:
             break
         time.sleep(poll_interval)
