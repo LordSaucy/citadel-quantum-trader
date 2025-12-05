@@ -8,7 +8,12 @@ and upload both the snapshot and a JSON manifest containing:
     * UTC timestamp of signing
 """
 
-import os, sys, json, datetime, logging
+import os
+import sys
+import json
+import base64
+import datetime
+import logging
 from pathlib import Path
 from utils import sha256_hex, kms_sign, s3_put
 
@@ -33,6 +38,8 @@ KMS_SIGN_KEY    = os.getenv('KMS_SIGNING_KEY')          # e.g. arn:aws:kms:…
 # (set AWS_KMS_S3_KEY env var if you want a distinct key)
 
 # ------------------------------------------------------------------
+
+
 def find_latest_snapshot() -> Path:
     """Return the newest snapshot file (lexicographically highest)."""
     candidates = sorted(LEDGER_DIR.glob(f'{SNAPSHOT_PREFIX}*.json'))
@@ -49,12 +56,20 @@ def build_manifest(snapshot_key: str, merkle_root: str, signature_b64: str) -> b
         "snapshot_key": snapshot_key,
         "merkle_root": merkle_root,
         "signature_b64": signature_b64,
-        "signed_at_utc": datetime.datetime.now().isoformat() + "Z"
+        "signed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }
     return json.dumps(manifest, separators=(',', ':')).encode('utf-8')
 
 
 def main():
+    """
+    Main workflow:
+    1. Find latest snapshot
+    2. Compute SHA-256 hash (Merkle root)
+    3. Sign with KMS
+    4. Upload snapshot to S3
+    5. Upload manifest to S3
+    """
     try:
         # 1️⃣ Locate the most recent hourly snapshot
         snap_path = find_latest_snapshot()
@@ -71,26 +86,40 @@ def main():
         # 4️⃣ Upload the snapshot itself (object key = filename)
         snapshot_key = f'snapshots/{snap_path.name}'
         with open(snap_path, 'rb') as f:
-            s3_put(S3_BUCKET, snapshot_key, f.read(), content_type='application/json')
+            # ✅ FIXED: Removed duplicate content_type parameter
+            s3_put(
+                S3_BUCKET,
+                snapshot_key,
+                f.read(),
+                content_type='application/json'
+            )
 
         # 5️⃣ Build and upload the manifest (signature file)
         manifest_body = build_manifest(snapshot_key, merkle_root, signature_b64)
         manifest_key = f'signatures/{snap_path.stem}_manifest.json'
-        s3_put(S3_BUCKET, manifest_key, manifest_body, content_type='application/json')
+        # ✅ FIXED: Removed duplicate content_type parameter
+        s3_put(
+            S3_BUCKET,
+            manifest_key,
+            manifest_body,
+            content_type='application/json'
+        )
 
         log.info("Nightly signing job completed successfully.")
+        return 0
+
     except Exception as exc:
         # Critical failure – push a Slack alert (or PagerDuty) and exit non‑zero
         log.exception("Signing job FAILED")
         # Simple webhook example (replace with your real alert endpoint)
         webhook = os.getenv('ALERT_WEBHOOK_URL')
         if webhook:
-            import requests
-            payload = {
-                "text": f":rotating_light: *CQT signing job failed* – {exc}",
-                "attachments": [{"color": "danger"}]
-            }
             try:
+                import requests
+                payload = {
+                    "text": f":rotating_light: *CQT signing job failed* – {exc}",
+                    "attachments": [{"color": "danger"}]
+                }
                 requests.post(webhook, json=payload, timeout=5)
             except Exception:
                 pass
