@@ -104,7 +104,7 @@ def verify_token(token: str) -> bool:
 
 def check_rate_limit(ip: str) -> bool:
     """Allow up to ``MAX_REQUESTS_PER_MINUTE`` requests per IP."""
-    now = datetime.utcnow()
+    now = datetime.now()
     window_start = now - timedelta(minutes=1)
 
     timestamps = request_counts.get(ip, [])
