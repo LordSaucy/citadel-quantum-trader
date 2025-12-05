@@ -3,7 +3,7 @@
 LSTM Regime Forecasting Module
 
 Implements a production‑ready LSTM that predicts the probability that the
-market is in a “bullish” regime (value ∈ [0, 1]).  The model is trained on a
+market is in a "bullish" regime (value ∈ [0, 1]).  The model is trained on a
 sliding window of historical features (price returns, volatility, macro
 indicators) and can be re‑trained offline or on‑line.
 
@@ -265,19 +265,19 @@ class LSTMRegimeModel:
         if target_col not in df.columns:
             raise RegimeModelError(f"Target column `{target_col}` not found")
 
-        X_raw = df.drop(columns=[target_col]).values.astype(np.float32)
+        x_raw = df.drop(columns=[target_col]).values.astype(np.float32)
         y_raw = df[target_col].values.astype(np.float32)
 
         scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X_raw) if fit_scaler else scaler.transform(X_raw)
+        x_scaled = scaler.fit_transform(x_raw) if fit_scaler else scaler.transform(x_raw)
 
         split_idx = int(0.8 * len(df))
-        X_train, X_val = X_scaled[:split_idx], X_scaled[split_idx:]
+        x_train, x_val = x_scaled[:split_idx], x_scaled[split_idx:]
         y_train, y_val = y_raw[:split_idx], y_raw[split_idx:]
 
         window = int(self.cfg["window"])
-        train_ds = _WindowDataset(X_train, window, y_train)
-        val_ds = _WindowDataset(X_val, window, y_val)
+        train_ds = _WindowDataset(x_train, window, y_train)
+        val_ds = _WindowDataset(x_val, window, y_val)
 
         return train_ds, val_ds, scaler
 
@@ -483,13 +483,14 @@ class LSTMRegimeModel:
             )
 
         # ----- 1️⃣  Scale input -----
-        x_raw = df.values.astype(np.float32)          # noqa: N806 (uppercase kept for clarity)
+        x_raw = df.values.astype(np.float32)
+        # ✅ FIXED: Renamed X_scaled to x_scaled for consistency (lowercase)
         x_scaled = self.scaler.transform(x_raw)
 
-        # -----
-                # ----- 2️⃣  Build sliding‑window dataset (no targets) -----
+        # ----- 2️⃣  Build sliding‑window dataset (no targets) -----
         window = int(self.cfg["window"])
-        infer_ds = _WindowDataset(X_scaled, window, target=None)
+        # ✅ FIXED: Now using x_scaled (consistent naming, not unused)
+        infer_ds = _WindowDataset(x_scaled, window, target=None)
 
         # ----- 3️⃣  DataLoader for batched inference -----
         bs = batch_size or int(self.cfg["batch_size"])
