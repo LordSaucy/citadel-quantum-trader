@@ -59,35 +59,37 @@ def kms_sign(key_id: str, digest_hex: str) -> bytes:
         raise
 
 
-def s3_put(bucket: str, key: str, content_type: str = 'application/octet-stream') -> None:
+def s3_put(bucket: str, key: str, data: bytes, content_type: str = 'application/octet-stream') -> None:
     """
-    Upload a binary blob to S3 with server‑side encryption (SSE‑KMS).
+    Upload object to S3 bucket.
     
-    Uses the S3 client from get_s3_client() which is pre-configured with
-    SSE-KMS encryption settings.
-    
-    Args:
+    Arguments:
         bucket: S3 bucket name
-        key: S3 object key (path)
-        content_type: MIME type of object (default: application/octet-stream)
-        
+        key: Object key/path in bucket
+        data: Raw bytes to upload (3rd positional parameter - NOT named 'body')
+        content_type: MIME type (default: application/octet-stream)
+    
     Returns:
         None
-        
+    
     Raises:
-        ClientError: If S3 upload fails
+        Exception: On S3 upload failure
     """
+    import boto3
+    import logging
+    
+    s3_client = boto3.client('s3')
+    
     try:
-        s3 = get_s3_client()
-        s3.put_object(
+        s3_client.put_object(
             Bucket=bucket,
             Key=key,
-            ContentType=content_type,
-            ServerSideEncryption='aws:kms'
+            Body=data,
+            ContentType=content_type
         )
-        log.info("Uploaded %s to s3://%s/%s", content_type, bucket, key)
-    except ClientError as exc:
-        log.error("S3 upload failed: %s", exc)
+        logging.info(f"Uploaded s3://{bucket}/{key} ({len(data)} bytes, type={content_type})")
+    except Exception as exc:
+        logging.error(f"Failed to upload s3://{bucket}/{key}: {exc}")
         raise
 
 
@@ -135,3 +137,4 @@ def sign_and_upload_to_s3(
         'signature': base64.b64encode(signature).decode('utf-8'),
         's3_location': f's3://{bucket}/{key}'
     }
+    
