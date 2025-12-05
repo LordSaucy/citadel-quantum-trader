@@ -20,18 +20,20 @@
 
 set -euo pipefail
 
-#---------------------------------------------------------------------------
-# Helper: log with timestamp and emoji (makes container logs easier to read)
-#---------------------------------------------------------------------------
+#===============================================================================
+# ✅ FIXED: Helper function - log with timestamp and emoji
+#           Added explicit return statement at end of function
+#===============================================================================
 log() {
     local level="${1}"
     local msg="${2}"
     echo -e "$(date -u +"%Y-%m-%dT%H:%M:%SZ") ${level} ${msg}"
+    return 0   # ✅ explicit return for SonarQube (BASH:S1131)
 }
 
-#---------------------------------------------------------------------------
-# 1️⃣ Load Docker secrets (mounted read‑only at /run/secrets/*)
-#---------------------------------------------------------------------------
+#===============================================================================
+# Load Docker secrets (mounted read‑only at /run/secrets/*)
+#===============================================================================
 if [[ -d /run/secrets ]]; then
     log "INFO" "🔐 Loading Docker secrets..."
     for secret_file in /run/secrets/*; do
@@ -44,9 +46,9 @@ else
     log "WARN" "⚠️ No /run/secrets directory – proceeding without Docker secrets."
 fi
 
-#---------------------------------------------------------------------------
-# 2️⃣ Load static defaults from .env (if the file exists)
-#---------------------------------------------------------------------------
+#===============================================================================
+# Load static defaults from .env (if the file exists)
+#===============================================================================
 if [[ -f /app/.env ]]; then
     log "INFO" "📄 Loading .env file..."
     # Export all variables defined in .env (ignoring comments & empty lines)
@@ -58,9 +60,9 @@ else
     log "INFO" "ℹ️ No .env file found – using only Docker secrets and defaults."
 fi
 
-#---------------------------------------------------------------------------
-# 3️⃣ Start Vault Agent (optional side‑car)
-#---------------------------------------------------------------------------
+#===============================================================================
+# Start Vault Agent (optional side‑car)
+#===============================================================================
 VAULT_AGENT_PID=""
 if [[ -n "${VAULT_ADDR:-}" && -n "${VAULT_ROLE_ID:-}" && -n "${VAULT_SECRET_ID:-}" ]]; then
     log "INFO" "🔐 Starting Vault Agent (role‑id authentication)..."
@@ -71,12 +73,12 @@ else
     log "INFO" "🛡️ Vault environment variables not set – skipping Vault Agent (dev mode)."
 fi
 
-#---------------------------------------------------------------------------
-# 4️⃣ Wait for the Vault token (if the agent was started)
-#---------------------------------------------------------------------------
+#===============================================================================
+# Wait for the Vault token (if the agent was started)
+#===============================================================================
 if [[ -n "${VAULT_AGENT_PID}" ]]; then
     log "INFO" "⏳ Waiting for Vault token to appear at /run/secrets/.vault-token ..."
-    # Give Vault up to 30 seconds to authenticate; adjust as needed.
+    # Give Vault up to 30 seconds to authenticate; adjust as needed.
     timeout_secs=30
     elapsed=0
     while [[ ! -f /run/secrets/.vault-token && ${elapsed} -lt ${timeout_secs} ]]; do
@@ -96,9 +98,9 @@ if [[ -n "${VAULT_AGENT_PID}" ]]; then
     fi
 fi
 
-#---------------------------------------------------------------------------
-# 5️⃣ Prepare FastAPI launch command (uvicorn)
-#---------------------------------------------------------------------------
+#===============================================================================
+# Prepare FastAPI launch command (uvicorn)
+#===============================================================================
 # These defaults can be overridden via environment variables if you wish.
 FASTAPI_HOST="${FASTAPI_HOST:-0.0.0.0}"
 FASTAPI_PORT="${FASTAPI_PORT:-8000}"
@@ -115,25 +117,34 @@ UVICORN_CMD=(
 
 log "INFO" "🚀 Starting FastAPI admin API on ${FASTAPI_HOST}:${FASTAPI_PORT} (${FASTAPI_WORKERS} workers, log‑level=${FASTAPI_LOG_LEVEL})"
 
-#---------------------------------------------------------------------------
-# 6️⃣ Signal handling – ensure background processes are terminated cleanly
-#---------------------------------------------------------------------------
+#===============================================================================
+# ✅ FIXED: Graceful shutdown handler
+#           Added explicit return statement at end of function
+#===============================================================================
 shutdown() {
     log "INFO" "🛑 Received termination signal – shutting down..."
+    
     # If the Vault Agent is running, terminate it first
     if [[ -n "${VAULT_AGENT_PID}" ]]; then
         log "INFO" "🔐 Stopping Vault Agent (PID ${VAULT_AGENT_PID})"
         kill "${VAULT_AGENT_PID}" 2>/dev/null || true
         wait "${VAULT_AGENT_PID}" 2>/dev/null || true
     fi
+    
     # Forward the signal to uvicorn (which is the PID of the current process
     # after the exec below).  Because we use `exec` later, this function will
     # only be called when the container is stopping before exec runs.
     exit 0
+    return 1   # ✅ explicit return for SonarQube (BASH:S1131)
+                # Note: unreachable after exit 0, but SonarQube requires explicit return
 }
+
+#===============================================================================
+# Register signal handler for graceful shutdown
+#===============================================================================
 trap shutdown SIGTERM SIGINT
 
-#---------------------------------------------------------------------------
-# 7️⃣ Exec the FastAPI process (replaces the shell, PID 1)
-#---------------------------------------------------------------------------
+#===============================================================================
+# Exec the FastAPI process (replaces the shell, PID 1)
+#===============================================================================
 exec "${UVICORN_CMD[@]}"
