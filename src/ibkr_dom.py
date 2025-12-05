@@ -18,8 +18,8 @@ def get_dom(ib: IB, symbol: str, exchange: str = "IDEALPRO", depth: int = 20) ->
     for tick in md:
         rows.append({
             "price": tick.price,
-            "bid_volume": tick.size if tick.side == 0 else 0,   # 0 = bid
-            "ask_volume": tick.size if tick.side == 1 else 0,   # 1 = ask
+            "bid_volume": tick.size if tick.side == 0 else 0,   
+            "ask_volume": tick.size if tick.side == 1 else 0,   
         })
     df = pd.DataFrame(rows)
     df = df.groupby("price", as_index=False).sum()
