@@ -553,7 +553,7 @@ class BacktestValidator:
         analysis dict.  The filename encodes the symbol and a timestamp so
         that every run is uniquely identifiable.
         """
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"validation_{symbol}_{timestamp}.json"
         filepath = self.output_dir / filename
 
@@ -562,7 +562,7 @@ class BacktestValidator:
             "timeframe": timeframe,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "generated_at_utc": datetime.utcnow().isoformat(),
+            "generated_at_utc": datetime.now().isoformat(),
             "analysis": analysis,
         }
 
