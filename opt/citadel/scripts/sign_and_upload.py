@@ -86,22 +86,22 @@ def main():
         # 4️⃣ Upload the snapshot itself (object key = filename)
         snapshot_key = f'snapshots/{snap_path.name}'
         with open(snap_path, 'rb') as f:
-            # ✅ FIXED: Removed duplicate content_type parameter
+            # ✅ FIXED: Single, clean call with no duplicate parameters
             s3_put(
-                S3_BUCKET,
-                snapshot_key,
-                f.read(),
+                bucket=S3_BUCKET,
+                key=snapshot_key,
+                body=f.read(),
                 content_type='application/json'
             )
 
         # 5️⃣ Build and upload the manifest (signature file)
         manifest_body = build_manifest(snapshot_key, merkle_root, signature_b64)
         manifest_key = f'signatures/{snap_path.stem}_manifest.json'
-        # ✅ FIXED: Removed duplicate content_type parameter
+        # ✅ FIXED: Single, clean call with no duplicate parameters
         s3_put(
-            S3_BUCKET,
-            manifest_key,
-            manifest_body,
+            bucket=S3_BUCKET,
+            key=manifest_key,
+            body=manifest_body,
             content_type='application/json'
         )
 
