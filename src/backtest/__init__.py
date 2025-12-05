@@ -455,7 +455,7 @@ class BacktestEngine:
                 else None,
                 "initial_balance": self._initial_balance,
                 "final_balance": self.equity_curve[-1] if self.equity_curve else None,
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now().isoformat(),
                 "cost_model": self.costs,
             },
             "metrics": result.to_dict(),
