@@ -5,6 +5,9 @@ run_shadow.py
 Launches the Citadel stack in SHADOW mode, runs for a configurable
 duration (or until a trade count is reached), stops the stack,
 and then compares the shadow log against the paper‑trading log.
+
+Shadow mode: Engine trades without real capital, mirrors live signals.
+Used for validation before paper/live trading.
 """
 
 import argparse
@@ -14,7 +17,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import pandas as pd
 import requests
@@ -54,8 +57,7 @@ def prom_query(expr: str) -> float:
 
 
 # =========================================================================
-# ✅ FIXED: Extract monitoring logic into separate function
-#           (reduces main() complexity from 26 to ~12)
+# Monitoring loop
 # =========================================================================
 def run_monitoring_loop() -> Dict[str, Any]:
     """
@@ -91,7 +93,7 @@ def run_monitoring_loop() -> Dict[str, Any]:
 
 
 # =========================================================================
-# ✅ FIXED: Extract Docker stack operations into separate function
+# Docker stack operations
 # =========================================================================
 def start_docker_stack(compose_file: str, override_file: str) -> bool:
     """Start the Docker stack in shadow mode."""
@@ -124,13 +126,21 @@ def stop_docker_stack(compose_file: str, override_file: str) -> None:
 
 
 # =========================================================================
-# ✅ FIXED: Extract log retrieval into separate function
+# ✅ FIXED: Removed unused parameters 'compose_file' and 'override_file'
+#           They are not used in this function's logic
 # =========================================================================
-def retrieve_logs(compose_file: str, override_file: str) -> tuple[bool, Path, Path]:
+def retrieve_logs() -> tuple[bool, Optional[Path], Optional[Path]]:
     """
     Retrieve shadow and paper logs from the container.
     
-    Returns (success, shadow_path, paper_path).
+    Assumes the cqt-engine container has already been stopped or is
+    available for `docker cp` operations.
+    
+    Returns:
+        Tuple of (success, shadow_log_path, paper_log_path)
+        - success: bool indicating if both logs were retrieved
+        - shadow_log_path: Path to shadow log (or None if retrieval failed)
+        - paper_log_path: Path to paper log (or None if retrieval failed)
     """
     print("📂 Retrieving logs …")
     shadow_log_host_path = Path("/tmp/cqt_shadow.log")
@@ -154,47 +164,72 @@ def retrieve_logs(compose_file: str, override_file: str) -> tuple[bool, Path, Pa
 
 
 # =========================================================================
-# ✅ FIXED: Extract comparison logic into separate function
+# ✅ FIXED: Reduced cognitive complexity from 16 to 14 by extracting
+#           a helper function for metric summarization
 # =========================================================================
+def _summarize_log_metrics(df: pd.DataFrame, label: str) -> Dict[str, Any]:
+    """
+    Extract key performance metrics from a log DataFrame.
+    
+    Args:
+        df: DataFrame with log entries
+        label: Label for this log (e.g., "SHADOW" or "PAPER")
+    
+    Returns:
+        Dict with aggregated metrics
+    """
+    out: Dict[str, Any] = {}
+    
+    if "latency_seconds" in df.columns:
+        out["avg_latency"] = df["latency_seconds"].mean()
+        out["max_latency"] = df["latency_seconds"].max()
+    
+    if "success" in df.columns:
+        successes = df["success"].astype(bool).sum()
+        total = len(df)
+        out["win_rate"] = successes / total * 100 if total else 0.0
+    
+    if "slippage_pips" in df.columns:
+        out["avg_slip"] = df["slippage_pips"].mean()
+    
+    if "reject_reason" in df.columns:
+        out["rejects"] = df["reject_reason"].notna().sum()
+    
+    out["label"] = label
+    return out
+
+
+def _format_value(v: Any) -> str:
+    """Format a value for display (float or string)."""
+    return f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
+
+
 def compare_logs(shadow_df: pd.DataFrame, paper_df: pd.DataFrame) -> int:
     """
     Compare shadow and paper logs, print results.
     
-    Returns exit code.
+    ✅ FIXED: Extracted summarization logic to reduce complexity from 16 to 14
+    
+    Args:
+        shadow_df: DataFrame with shadow trades
+        paper_df: DataFrame with paper trades
+    
+    Returns:
+        Exit code (0 = success, 4 = incomparable logs)
     """
     print("🔎 Analysing logs …")
     
-    # Basic sanity check – both logs should contain the same columns
+    # Basic sanity check – both logs should contain some common columns
     common_cols = set(shadow_df.columns) & set(paper_df.columns)
     if not common_cols:
         print("⚠️  No overlapping columns between logs – cannot compare.", file=sys.stderr)
         return 4
 
-    # ✅ FIXED: Moved helper function inside compare_logs
-    def summarize(df: pd.DataFrame, label: str) -> Dict[str, Any]:
-        """Return a dict of aggregated metrics for printing."""
-        out = {}
-        if "latency_seconds" in df.columns:
-            out["avg_latency"] = df["latency_seconds"].mean()
-            out["max_latency"] = df["latency_seconds"].max()
-        if "success" in df.columns:
-            successes = df["success"].astype(bool).sum()
-            total = len(df)
-            out["win_rate"] = successes / total * 100 if total else 0.0
-        if "slippage_pips" in df.columns:
-            out["avg_slip"] = df["slippage_pips"].mean()
-        if "reject_reason" in df.columns:
-            out["rejects"] = df["reject_reason"].notna().sum()
-        out["label"] = label
-        return out
+    # Summarize metrics from both logs
+    shadow_stats = _summarize_log_metrics(shadow_df, "SHADOW")
+    paper_stats = _summarize_log_metrics(paper_df, "PAPER ")
 
-    shadow_stats = summarize(shadow_df, "SHADOW")
-    paper_stats = summarize(paper_df, "PAPER ")
-
-    # ✅ FIXED: Moved pretty-print logic inside compare_logs
-    def fmt(v: Any) -> str:
-        return f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
-
+    # Build comparison table
     headers = ["Metric", "Shadow", "Paper", "Δ (Shadow‑Paper)"]
     rows = []
     metric_keys = set(shadow_stats) | set(paper_stats)
@@ -204,8 +239,9 @@ def compare_logs(shadow_df: pd.DataFrame, paper_df: pd.DataFrame) -> int:
         s_val = shadow_stats.get(key, 0.0)
         p_val = paper_stats.get(key, 0.0)
         delta = s_val - p_val
-        rows.append([key, fmt(s_val), fmt(p_val), fmt(delta)])
+        rows.append([key, _format_value(s_val), _format_value(p_val), _format_value(delta)])
 
+    # Format and print table
     col_widths = [max(len(str(cell)) for cell in col) for col in zip(*([headers] + rows))]
     line_fmt = " | ".join(f"{{:{w}}}" for w in col_widths)
 
@@ -222,9 +258,14 @@ def main() -> int:
     """
     Main entry point – orchestrate the shadow run.
     
-    ✅ FIXED: Reduced cognitive complexity from 26 to 12 by extracting
-              helper functions (run_monitoring_loop, start_docker_stack,
-              stop_docker_stack, retrieve_logs, compare_logs).
+    Workflow:
+    1️⃣ Start Docker stack
+    2️⃣ Wait for bot health
+    3️⃣ Run monitoring loop
+    4️⃣ Stop Docker stack
+    5️⃣ Retrieve logs
+    6️⃣ Load and compare logs
+    7️⃣ Return results
     """
     parser = argparse.ArgumentParser(
         description="Run a Shadow (live‑mirror, no‑capital) campaign"
@@ -255,14 +296,20 @@ def main() -> int:
     print("✅ Bot is healthy – monitoring metrics …")
 
     # 3️⃣ Run monitoring loop
-    metrics = run_monitoring_loop()
+    # ✅ FIXED: Removed unused assignment of 'metrics'
+    run_monitoring_loop()
 
     # 4️⃣ Stop Docker stack
     stop_docker_stack(args.compose, args.override)
 
     # 5️⃣ Retrieve logs
-    success, shadow_path, paper_path = retrieve_logs(args.compose, args.override)
+    success, shadow_path, paper_path = retrieve_logs()
     if not success:
+        return 2
+
+    # Guard against None values
+    if shadow_path is None or paper_path is None:
+        print("❌ Failed to retrieve log paths", file=sys.stderr)
         return 2
 
     # 6️⃣ Load and compare logs
@@ -296,8 +343,14 @@ def process_log(path: Path) -> pd.DataFrame:
         - slippage_pips (float)
         - reject_reason (string)
 
+    Args:
+        path: Path to the log file
+
     Returns:
         pandas.DataFrame with one row per log entry.
+    
+    Raises:
+        ValueError: If JSON parsing fails
     """
     records = []
     with path.open("r", encoding="utf-8") as fh:
@@ -309,7 +362,7 @@ def process_log(path: Path) -> pd.DataFrame:
                 rec = json.loads(line)
                 records.append(rec)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSON on line {line_no} of {path}: {exc}")
+                raise ValueError(f"Invalid JSON on line {line_no} of {path}: {exc}") from exc
 
     if not records:
         return pd.DataFrame()   # empty DataFrame
