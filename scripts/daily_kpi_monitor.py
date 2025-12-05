@@ -16,7 +16,7 @@ SLACK_WEBHOOK = "https://hooks.slack.com/services/AAA/BBB/CCC"   # <-- replace!
 # -------------------------------------------------
 def query(metric: str, lookback_min: int = 15) -> float | None:
     """Return the most recent value of *metric* over the last *lookback_min* minutes."""
-    end = datetime.utcnow()
+    end = datetime.now()
     start = end - timedelta(minutes=lookback_min)
 
     resp = requests.get(
