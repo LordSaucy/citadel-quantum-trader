@@ -257,7 +257,7 @@ class TradeDatabase:
                 WHERE ticket = ?;
                 """,
                 (
-                    datetime.utcnow().isoformat(),
+                    datetime.now().isoformat(),
                     exit_price,
                     profit,
                     r_multiple,
@@ -387,7 +387,7 @@ class TradeDatabase:
 
         Returns a dictionary with the most common KPIs.
         """
-        cutoff_iso = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff_iso = (datetime.now() - timedelta(days=days)).isoformat()
         cur = self._connect().cursor()
         cur.execute(
             """
@@ -461,7 +461,7 @@ class TradeDatabase:
                 ) VALUES (?,?,?,?,?,?,?,?);
                 """,
                 (
-                    datetime.utcnow().isoformat(),
+                    datetime.now().isoformat(),
                     balance,
                     equity,
                     margin_free,
