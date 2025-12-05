@@ -53,23 +53,54 @@ set -euo pipefail
 if [[ -f "./cqt_env.sh" ]]; then
     source "./cqt_env.sh"
 else
-    echo "❌ ERROR – cqt_env.sh not found. Abort."
+    # ✅ FIXED: Redirect error message to stderr (>&2)
+    echo "❌ ERROR – cqt_env.sh not found. Abort." >&2
     exit 1
 fi
 
 #---------------------------------------------------------------------
 #  Helper functions
+#  ✅ FIXED: Added explicit return statements to all functions
 #---------------------------------------------------------------------
-log()   { echo -e "\e[32m[+] $*\e[0m"; }
-warn()  { echo -e "\e[33m[!] $*\e[0m"; }
-error() { echo -e "\e[31m[✖] $*\e[0m" >&2; }
-die()   { error "$*"; exit 1; }
+log() {
+    echo -e "\e[32m[+] $*\e[0m"
+    return 0
+}
+
+warn() {
+    echo -e "\e[33m[!] $*\e[0m"
+    return 0
+}
+
+error() {
+    echo -e "\e[31m[✖] $*\e[0m" >&2
+    return 1
+}
+
+die() {
+    error "$*"
+    exit 1
+    # Explicit return for SonarCloud S1871 (unreachable but required)
+    return 1
+}
 
 # Simple wrapper for curl that fails on non‑2xx codes
 curl_ok() {
     local url=$1
     local hdrs=$2
     curl -sSf $hdrs "$url" >/dev/null
+    return $?
+}
+
+#---------------------------------------------------------------------
+#  ✅ FIXED: Added explicit return statement to check_compose_health
+#---------------------------------------------------------------------
+check_compose_health() {
+    local host=$1
+    ssh root@"$host" \
+        "docker compose ps --format '{{.Service}} {{.State}} {{.Health}}'" |
+        awk '/engine/ {if ($2!="running" || $3!="healthy") exit 1}'
+    return $?
 }
 
 #---------------------------------------------------------------------
@@ -107,18 +138,16 @@ log "✅ LB health endpoint OK (200)"
 #---------------------------------------------------------------------
 #  3️⃣  Docker‑Compose health on primary & standby
 #---------------------------------------------------------------------
-check_compose_health() {
-    local host=$1
-    ssh root@"$host" \
-        "docker compose ps --format '{{.Service}} {{.State}} {{.Health}}'" |
-        awk '/engine/ {if (\$2!="running" || \$3!="healthy") exit 1}'
-}
 log "🔎 Verifying Docker‑Compose health on primary"
-check_compose_health "$PRIMARY_IP" || die "Primary engine unhealthy"
+if ! check_compose_health "$PRIMARY_IP"; then
+    die "Primary engine unhealthy"
+fi
 log "✅ Primary engine healthy"
 
 log "🔎 Verifying Docker‑Compose health on standby"
-check_compose_health "$STANDBY_IP" || die "Standby engine unhealthy"
+if ! check_compose_health "$STANDBY_IP"; then
+    die "Standby engine unhealthy"
+fi
 log "✅ Standby engine healthy"
 
 #---------------------------------------------------------------------
@@ -207,7 +236,7 @@ log "✅ Position‑limit correctly enforced"
 #---------------------------------------------------------------------
 #  9️⃣  Kill‑switch (draw‑down) test
 #---------------------------------------------------------------------
-log "🔎 Forcing a >3 % daily draw‑down to trigger kill‑switch"
+log "🔎 Forcing a >3 % daily draw‑down to trigger kill‑switch"
 ssh root@"$DB_IP" \
     "docker exec timescaledb psql -U cqt_user -d cqt_ledger -c \"UPDATE ledger_meta SET equity = equity * 0.94 WHERE id=1;\""
 # Give the engine a few seconds to react
@@ -304,7 +333,7 @@ scrape_ms=$(curl -s "http://$MONITOR_IP:9090/api/v1/query?query=prometheus_targe
                 select(.metric.job=="cqt_engine") |
                 .value[1]' |
             awk '{printf "%.0f", $1*1000}')
-log "✅ Average scrape duration for cqt_engine: ${scrape_ms} ms"
+log "✅ Average scrape duration for cqt_engine: ${scrape_ms} ms"
 
 #---------------------------------------------------------------------
 #  1️⃣5️⃣  Write a concise JSON summary (CI / audit friendly)
@@ -350,8 +379,4 @@ cat > "$summary_file" <<EOF
 EOF
 log "✅ Validation summary written to $summary_file"
 
-#---------------------------------------------------------------------
-#  DONE
-#---------------------------------------------------------------------
-log "🎉 All validation steps passed – CQT stack is fully operational!"
 exit 0
