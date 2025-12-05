@@ -615,7 +615,7 @@ class BacktestValidator:
             "timeframe": timeframe,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "generated_at_utc": datetime.utcnow().isoformat(),
+            "generated_at_utc": datetime.now().isoformat(),
             "analysis": analysis,
         }
 
