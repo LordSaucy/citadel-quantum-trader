@@ -209,7 +209,6 @@ class TestDepthGuard:
                 {"side": "ask", "price": 1.0, "bid_volume": 0, "ask_volume": 90},
             ]
         )
-        # LIR = min(bid_vol, ask_vol) / max(bid_vol, ask_vol) = 10/90 = 0.11 < 0.5 (fails)
         assert not check_depth(broker, "EURUSD", required_volume=50, min_lir=0.5)
 
     def test_depth_guard_fail_insufficient_volume(self, dummy_broker):
@@ -220,7 +219,6 @@ class TestDepthGuard:
                 {"side": "ask", "price": 1.0, "bid_volume": 0, "ask_volume": 30},
             ]
         )
-        # Total = 60, but required = 200 (fails on volume, not LIR)
         assert not check_depth(broker, "EURUSD", required_volume=200, min_lir=0.5)
 
     def test_depth_guard_empty_depth_book(self, dummy_broker):
@@ -236,7 +234,6 @@ class TestDepthGuard:
                 {"side": "ask", "price": 1.0, "bid_volume": 0, "ask_volume": 100},
             ]
         )
-        # LIR = 50/100 = 0.5 (exactly at min_lir threshold, should pass)
         assert check_depth(broker, "EURUSD", required_volume=100, min_lir=0.5)
 
     @pytest.mark.parametrize(
@@ -283,10 +280,7 @@ class TestLatencyGuard:
     def test_latency_guard_boundary_exactly_at_limit(self, dummy_broker):
         """Test boundary condition: latency exactly at maximum threshold."""
         broker = dummy_broker(latency=0.15)
-        # At the boundary; implementation determines if it passes or fails
-        # (typically boundary is inclusive: latency <= max_latency)
         result = check_latency(broker, max_latency_sec=0.15)
-        # Should pass since 0.15 <= 0.15
         assert result is True
 
     def test_latency_guard_very_low_latency(self, dummy_broker):
@@ -338,7 +332,6 @@ class TestSpreadGuard:
     def test_spread_guard_boundary_exactly_at_limit(self, dummy_broker):
         """Test boundary condition: spread exactly at maximum threshold."""
         broker = dummy_broker(spread=0.5)
-        # At the boundary; should pass (0.5 <= 0.5)
         assert check_spread(broker, "EURUSD", max_spread_pips=0.5)
 
     def test_spread_guard_tight_spread_1_pip(self, dummy_broker):
@@ -391,10 +384,8 @@ class TestVolatilityGuard:
 
     def test_volatility_guard_boundary_exactly_at_limit(self, dummy_tech_calculator):
         """Test boundary condition: ATR % exactly at maximum threshold."""
-        # atr/price = 0.002/1.0 = 0.2 = 20% (at the limit)
         tech = dummy_tech_calculator(atr=0.002, avg_atr=0.001, price=1.0)
         result = check_volatility(tech, "EURUSD", max_atr_pct=0.20)
-        # Should pass since 0.20 <= 0.20
         assert result is True
 
     def test_volatility_guard_very_low_volatility(self, dummy_tech_calculator):
@@ -446,7 +437,6 @@ class TestGuardRailsIntegration:
         )
         tech = dummy_tech_calculator(atr=0.001, avg_atr=0.001, price=1.0)
 
-        # All guards should pass
         assert check_depth(broker, "EURUSD", required_volume=100, min_lir=0.5)
         assert check_latency(broker, max_latency_sec=0.15)
         assert check_spread(broker, "EURUSD", max_spread_pips=0.5)
@@ -456,7 +446,6 @@ class TestGuardRailsIntegration:
         """Test during market stress (high latency and spread)."""
         broker = dummy_broker(latency=0.5, spread=2.0)
 
-        # Both should fail under stress
         assert not check_latency(broker, max_latency_sec=0.15)
         assert not check_spread(broker, "EURUSD", max_spread_pips=0.5)
 
@@ -464,7 +453,6 @@ class TestGuardRailsIntegration:
         """Test during news event (volatility spike)."""
         tech = dummy_tech_calculator(atr=0.01, avg_atr=0.001, price=1.0)
 
-        # Volatility should fail
         assert not check_volatility(tech, "EURUSD", max_atr_pct=0.20)
 
     def test_liquidity_drought_thin_market(self, dummy_broker):
@@ -476,7 +464,6 @@ class TestGuardRailsIntegration:
             ]
         )
 
-        # Depth should fail (insufficient volume and poor LIR)
         assert not check_depth(broker, "EURUSD", required_volume=50, min_lir=0.5)
 
 
@@ -489,27 +476,20 @@ class TestEdgeCases:
 
     def test_zero_price_prevents_division_error(self, dummy_tech_calculator):
         """Regression test: ensure zero price doesn't cause division error."""
-        # This tests that the guard handles edge case gracefully
         tech = dummy_tech_calculator(atr=0.001, avg_atr=0.001, price=0.0)
-        # Should either raise ValueError or return False (implementation-dependent)
         try:
             result = check_volatility(tech, "EURUSD", max_atr_pct=0.20)
-            # If no exception, result should be deterministic
             assert isinstance(result, bool)
         except (ValueError, ZeroDivisionError):
-            # Acceptable if guard explicitly rejects zero price
             pass
 
     def test_negative_latency_invalid(self, dummy_broker):
         """Edge case: negative latency should be handled."""
         broker = dummy_broker(latency=-0.1)
-        # Negative latency is physically impossible; implementation should handle
         try:
             result = check_latency(broker, max_latency_sec=0.15)
-            # If no exception, result should be deterministic
             assert isinstance(result, bool)
         except ValueError:
-            # Acceptable: guard rejects invalid input
             pass
 
     def test_negative_spread_invalid(self, dummy_broker):
@@ -524,7 +504,6 @@ class TestEdgeCases:
     def test_empty_symbol_handled(self, dummy_broker):
         """Edge case: empty symbol string."""
         broker = dummy_broker(spread=0.3)
-        # Empty symbol is unusual but should be handled gracefully
         try:
             result = check_spread(broker, "", max_spread_pips=0.5)
             assert isinstance(result, bool)
