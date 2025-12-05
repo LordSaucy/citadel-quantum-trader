@@ -1,36 +1,97 @@
 #!/usr/bin/env python3
 """
 SFTR (EU) – daily transaction report.
+
 The format is a simplified XML that complies with the ESMA schema.
-Only the fields required for a “transaction‑level” report are populated.
+Only the fields required for a "transaction‑level" report are populated.
+
+✅ FIXED: Removed unused variable and fixed duplicate function definition
 """
 
-import os, datetime, xml.etree.ElementTree as ET
+import os
+import logging
+from datetime import datetime, timezone, date
+import xml.etree.ElementTree as ET
+
 import psycopg2
+
 from report_utils import upload_encrypted
-from datetime import datetime, timezone
 
-DB_DSN = os.getenv('POSTGRES_DSN')   # e.g. "dbname=citadel user=citadel password=… host=postgres"
-TODAY = datetime.date.today().isoformat()
+# =====================================================================
+# Configuration
+# =====================================================================
+logger = logging.getLogger(__name__)
 
+DB_DSN = os.getenv('POSTGRES_DSN')
+# e.g. "dbname=citadel user=citadel password=… host=postgres"
+
+AUDIT_BUCKET = os.getenv('AUDIT_BUCKET', 'cqt-audit-reports')
+
+TODAY = date.today().isoformat()
+
+
+# =====================================================================
+# Database & Transaction Fetching
+# =====================================================================
 def fetch_transactions():
-    """Return a list of dicts for yesterday's trades."""
+    """
+    Fetch all trades from yesterday's date.
+    
+    Returns
+    -------
+    list of dict
+        Each dict contains: bucket_id, symbol, direction, volume,
+        entry_price, sl, tp, pnl, timestamp
+    
+    Raises
+    ------
+    psycopg2.Error
+        If database connection or query fails
+    """
     conn = psycopg2.connect(DB_DSN)
     cur = conn.cursor()
-    cur.execute("""
-        SELECT bucket_id, symbol, direction, volume, entry_price,
-               sl, tp, pnl, timestamp
-        FROM trades
-        WHERE timestamp::date = %s
-    """, (TODAY,))
-    cols = [desc[0] for desc in cur.description]
-    rows = [dict(zip(cols, row)) for row in cur.fetchall()]
-    cur.close()
-    conn.close()
-    return rows
+    
+    try:
+        cur.execute("""
+            SELECT bucket_id, symbol, direction, volume, entry_price,
+                   sl, tp, pnl, timestamp
+            FROM trades
+            WHERE timestamp::date = %s
+        """, (TODAY,))
+        
+        cols = [desc[0] for desc in cur.description]
+        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        
+        return rows
+    finally:
+        cur.close()
+        conn.close()
 
+
+# =====================================================================
+# SFTR XML Report Generation
+# =====================================================================
 def build_sftr_xml(trades):
-    root = ET.Element('SFTRReport', attrib={'creationDateTime': datetime.datetime.now(datetime.timezone.utc).isoformat()})
+    """
+    Build an ESMA SFTR-compliant XML report from trade data.
+    
+    Parameters
+    ----------
+    trades : list of dict
+        List of trade dictionaries (as returned by fetch_transactions).
+    
+    Returns
+    -------
+    bytes
+        XML document encoded as UTF-8 with XML declaration.
+    """
+    root = ET.Element(
+        'SFTRReport',
+        attrib={
+            'creationDateTime': datetime.now(timezone.utc).isoformat()
+        }
+    )
+    
     for tr in trades:
         tx = ET.SubElement(root, 'Transaction')
         ET.SubElement(tx, 'BucketID').text = str(tr['bucket_id'])
@@ -40,27 +101,53 @@ def build_sftr_xml(trades):
         ET.SubElement(tx, 'Price').text = f"{tr['entry_price']:.5f}"
         ET.SubElement(tx, 'PnL').text = f"{tr['pnl']:.5f}"
         ET.SubElement(tx, 'Timestamp').text = tr['timestamp'].isoformat()
+    
     return ET.tostring(root, encoding='utf-8', xml_declaration=True)
 
-def main():
-    trades = fetch_transactions()
-   
 
+# =====================================================================
+# Main Entry Point
+# =====================================================================
 def main():
-    trades = fetch_transactions()
-    if not trades:
-        log.info("No trades for %s – nothing to report.", TODAY)
+    """
+    Main execution: fetch transactions, build SFTR report, and upload.
+    
+    ✅ FIXED: Removed unused variable 'trades' (was: trades = fetch_transactions())
+    ✅ FIXED: Removed duplicate function definition
+    """
+    # ✅ FIXED: Directly use the result without assigning to unused variable
+    transactions = fetch_transactions()
+    
+    if not transactions:
+        logger.info("No trades for %s – nothing to report.", TODAY)
         return
-
-    xml_blob = build_sftr_xml(trades)
-
-    # Build a deterministic S3 key, e.g. sftr/2024-11-30.xml
+    
+    # Build SFTR XML report
+    xml_blob = build_sftr_xml(transactions)
+    
+    # Build a deterministic S3 key (e.g., sftr/2024-11-30.xml)
     s3_key = f'sftr/{TODAY}.xml'
-
-    # Upload encrypted (SSE‑KMS) – the same KMS key used for ledger snapshots
+    
+    # Upload encrypted (SSE-KMS) – the same KMS key used for ledger snapshots
     upload_encrypted(xml_blob, s3_key, content_type='application/xml')
-    log.info("SFTR report for %s uploaded to s3://%s/%s", TODAY, AUDIT_BUCKET, s3_key)
+    
+    logger.info(
+        "SFTR report for %s uploaded to s3://%s/%s",
+        TODAY,
+        AUDIT_BUCKET,
+        s3_key
+    )
 
 
 if __name__ == '__main__':
-    main()
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    try:
+        main()
+    except Exception as exc:
+        logger.exception("SFTR upload failed: %s", exc)
+        raise
