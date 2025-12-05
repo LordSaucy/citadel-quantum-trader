@@ -120,9 +120,12 @@ def test_aggregate_depth(monkeypatch, fake_cfg):
     vm = VenueManager()
     agg = vm.aggregate_depth("EURUSD")
     
-    # ✅ Verify aggregation: both venues contribute 0.5 lot each
-    assert agg["bid_volume"] == 1.0, "Expected 0.5 (MT5) + 0.5 (IBKR) = 1.0 total bid"
-    assert agg["ask_volume"] == 1.0, "Expected 0.5 (MT5) + 0.5 (IBKR) = 1.0 total ask"
+    # ✅ FIXED: Use pytest.approx() for floating point comparisons
+    # WHY: Floating point arithmetic can have precision issues (e.g., 0.1 + 0.2 != 0.3 in IEEE 754)
+    # Using == for float values is unreliable; pytest.approx() uses relative/absolute tolerance
+    # Default: relative tolerance 1e-6, absolute tolerance 1e-12
+    assert agg["bid_volume"] == pytest.approx(1.0), "Expected 0.5 (MT5) + 0.5 (IBKR) = 1.0 total bid"
+    assert agg["ask_volume"] == pytest.approx(1.0), "Expected 0.5 (MT5) + 0.5 (IBKR) = 1.0 total ask"
 
 
 def test_meets_minimum_depth(monkeypatch, fake_cfg):
@@ -236,9 +239,12 @@ def test_venue_manager_initialization(monkeypatch, fake_cfg):
     assert hasattr(vm, "venues"), "VenueManager should have 'venues' attribute"
     assert len(vm.venues) == 2, "Expected 2 venues (MT5, IBKR)"
     
-    # ✅ Verify config settings are loaded
-    assert vm.min_depth_multiplier == 2.0, "Expected min_depth_multiplier=2.0 from config"
-    assert vm.contract_notional == 100_000, "Expected contract_notional=100_000 from config"
+    # ✅ FIXED: Use pytest.approx() for floating point comparisons
+    # WHY: Configuration values like min_depth_multiplier are floats
+    # Using == can fail due to floating point precision issues
+    # pytest.approx() compares with tolerance (default: 1e-6 relative, 1e-12 absolute)
+    assert vm.min_depth_multiplier == pytest.approx(2.0), "Expected min_depth_multiplier=2.0 from config"
+    assert vm.contract_notional == pytest.approx(100_000), "Expected contract_notional=100_000 from config"
 
 
 def test_aggregate_depth_empty_venues(monkeypatch, fake_cfg):
@@ -271,9 +277,12 @@ def test_aggregate_depth_empty_venues(monkeypatch, fake_cfg):
     vm = VenueManager()
     agg = vm.aggregate_depth("EURUSD")
     
-    # ✅ Verify aggregation handles empty data gracefully
-    assert agg["bid_volume"] == 0.0, "Expected bid_volume=0 for empty depth"
-    assert agg["ask_volume"] == 0.0, "Expected ask_volume=0 for empty depth"
+    # ✅ FIXED: Use pytest.approx() for floating point comparisons
+    # WHY: bid_volume and ask_volume are floats
+    # Even 0.0 should be compared with tolerance to handle floating point edge cases
+    # (e.g., accumulation of tiny rounding errors that result in -1e-15 instead of 0.0)
+    assert agg["bid_volume"] == pytest.approx(0.0), "Expected bid_volume=0 for empty depth"
+    assert agg["ask_volume"] == pytest.approx(0.0), "Expected ask_volume=0 for empty depth"
     
     # ✅ meets_minimum should return False with no liquidity
     assert not vm.meets_minimum(0.01, agg), "Expected meets_minimum=False with zero liquidity"
