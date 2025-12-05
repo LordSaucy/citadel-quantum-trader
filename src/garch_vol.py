@@ -27,37 +27,37 @@ Typical usage:
     cond_vol_series = estimator.historical_vol()
 """
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Standard library
-# ----------------------------------------------------------------------
+# =====================================================================
 import logging
 import warnings
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Third‑party
-# ----------------------------------------------------------------------
+# =====================================================================
 import numpy as np
 import pandas as pd
 from arch import arch_model
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # CQT internal imports (optional – only needed for config loading)
-# ----------------------------------------------------------------------
+# =====================================================================
 try:
     from src.config import Config
 except Exception:  # pragma: no cover – fallback for unit tests that import the module directly
     Config = None  # type: ignore
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Logging
-# ----------------------------------------------------------------------
+# =====================================================================
 logger = logging.getLogger(__name__)
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Helper: simple ATR (Average True Range) – used as a safe fallback
-# ----------------------------------------------------------------------
+# =====================================================================
 def _atr(series: pd.Series, period: int = 14) -> float:
     """
     Compute the classic ATR over the last ``period`` candles.
@@ -96,9 +96,9 @@ def _atr(series: pd.Series, period: int = 14) -> float:
     return float(atr_val)
 
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Main class
-# ----------------------------------------------------------------------
+# =====================================================================
 class GarchVolatilityEstimator:
     """
     Wrapper around the ``arch`` library that provides a clean API
@@ -110,9 +110,9 @@ class GarchVolatilityEstimator:
     internally and can be reused for many forecasts.
     """
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Construction
-    # ------------------------------------------------------------------
+    # =====================================================================
     def __init__(
         self,
         cfg: Optional[Dict[str, Any]] = None,
@@ -136,7 +136,7 @@ class GarchVolatilityEstimator:
             * ``garch_q`` – ARCH order *q* (default 1)
             * ``garch_dist`` – distribution (``"normal"``, ``"t"``, …)
             * ``garch_horizon`` – forecast horizon in steps (default 1)
-            * ``garch_cache_seconds`` – how long a forecast result is cached (default 30 s)
+            * ``garch_cache_seconds`` – how long a forecast result is cached (default 30 s)
 
         p, q, dist, horizon, cache_seconds : int / str
             Direct overrides if you do not want to rely on the config file.
@@ -175,9 +175,9 @@ class GarchVolatilityEstimator:
             self.horizon,
         )
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Private helpers
-    # ------------------------------------------------------------------
+    # =====================================================================
     @staticmethod
     def _ensure_series(series: pd.Series) -> pd.Series:
         """
@@ -201,9 +201,9 @@ class GarchVolatilityEstimator:
         self._forecast_cache.clear()
         logger.debug("GarchVolatilityEstimator cache cleared")
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Public API – fitting
-    # ------------------------------------------------------------------
+    # =====================================================================
     def fit(self, price_series: pd.Series) -> None:
         """
         Fit a GARCH(p,q) model to the *log‑returns* of ``price_series``.
@@ -268,9 +268,9 @@ class GarchVolatilityEstimator:
             self._last_fit_ts,
         )
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Public API – forecast
-    # ------------------------------------------------------------------
+    # =====================================================================
     def forecast(self, steps: Optional[int] = None) -> float:
         """
         Return the **one‑step ahead conditional volatility** (in *pips*).
@@ -289,13 +289,13 @@ class GarchVolatilityEstimator:
         float
             Forecast volatility expressed in price units (same scale as the
             input price series).  For FX pairs you may want to convert to
-            pips by multiplying by 10 000 (or 100 for JPY pairs).
+            pips by multiplying by 10 000 (or 100 for JPY pairs).
         """
         steps = steps if steps is not None else self.horizon
 
-        # ----------------------------------------------------------------
+        # =====================================================================
         # Cache lookup – avoid recomputing the same forecast within the TTL
-        # ----------------------------------------------------------------
+        # =====================================================================
         now = datetime.now()
         cache_key = (steps, pd.Timestamp(now))
 
@@ -307,20 +307,21 @@ class GarchVolatilityEstimator:
                 )
                 return vol
 
-        # ----------------------------------------------------------------
+        # =====================================================================
         # If we have a fitted model, use it
-        # ----------------------------------------------------------------
+        # =====================================================================
         if self._fitted is not None:
             try:
                 # ``forecast`` returns a DataFrame with columns: variance, sigma, etc.
                 fc = self._fitted.forecast(horizon=steps, reindex=False)
+                # ✅ FIXED: Removed unused variable `recent_price`
                 # Conditional variance for the *last* observation + horizon
-                var = fc.variance.iloc[-1, steps - 1]  # variance = sigma²
-                sigma = np.sqrt(var)  # conditional std‑dev
+                var = fc.variance.iloc[-1, steps - 1]
+                sigma = np.sqrt(var)
+                # ✅ FIXED: Removed comment about sigma² (was dead code documentation)
                 # Convert from % (since we fitted on % returns) to price units:
                 #   sigma% * price ≈ price change
                 # We approximate by using the *most recent* price.
-                recent_price = self._model.resids.index[-1]  # index of last residual
                 price_series = self._model._y  # original returns series (in %)
                 # Approximate price level (inverse log‑return)
                 price_level = np.exp(price_series.cumsum()[-1] / 100.0)
@@ -341,9 +342,9 @@ class GarchVolatilityEstimator:
                 logger.exception("GARCH forecast failed, falling back to ATR")
                 # Fall through to the ATR fallback
 
-        # ----------------------------------------------------------------
+        # =====================================================================
         # Fallback: simple ATR (requires recent price series)
-        # ----------------------------------------------------------------
+        # =====================================================================
         # NOTE: The caller must have supplied a recent price series via
         # ``fit``; we keep the last series in ``self._model._y`` (percent returns).
         # We reconstruct a price series from those returns.
@@ -370,9 +371,9 @@ class GarchVolatilityEstimator:
             logger.exception("ATR fallback also failed")
             raise RuntimeError("Unable to compute volatility (GARCH + ATR both failed)") from exc
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Public API – historical conditional volatility series
-    # ------------------------------------------------------------------
+    # =====================================================================
     def historical_vol(self) -> pd.Series:
         """
         Return the *conditional volatility* (sigma) estimated by the fitted
@@ -406,9 +407,9 @@ class GarchVolatilityEstimator:
         )
         return pd.Series(sigma_price_units, index=cond_sigma.index)
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Utility: quick one‑liner for external callers
-    # ------------------------------------------------------------------
+    # =====================================================================
     @classmethod
     def quick_vol(
         cls,
@@ -444,15 +445,16 @@ class GarchVolatilityEstimator:
         return estimator.forecast(steps=steps)
 
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # If this file is executed directly, run a tiny demo
-# ----------------------------------------------------------------------
+# =====================================================================
 if __name__ == "__main__":
     # Simple demo using random walk data
-    np.random.seed(42)
+    rng = np.random.default_rng(seed=42)
+    # ✅ FIXED: Use numpy.random.Generator instead of legacy np.random.normal
     dates = pd.date_range(start="2024-01-01", periods=250, freq="D")
     # Simulate a price series around 1.2000 (FX style)
-    price = 1.2000 + np.cumsum(np.random.normal(0, 0.001, size=len(dates)))
+    price = 1.2000 + np.cumsum(rng.normal(0, 0.001, size=len(dates)))
     price_series = pd.Series(price, index=dates)
 
     # Load a dummy config (could also be None)
@@ -467,28 +469,27 @@ if __name__ == "__main__":
     est = GarchVolatilityEstimator(dummy_cfg)
     est.fit(price_series)
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Forecast the next‑step volatility and print it
-    # ------------------------------------------------------------------
+    # =====================================================================
     forecast_vol = est.forecast()
     print(f"\n▶️  1‑step ahead forecast volatility (price units): {forecast_vol:.6f}")
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Also demonstrate a multi‑step forecast (e.g., 5 steps ahead)
-    # ------------------------------------------------------------------
+    # =====================================================================
     forecast_5 = est.forecast(steps=5)
     print(f"▶️  5‑step ahead forecast volatility (price units): {forecast_5:.6f}")
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Show the historical conditional volatility series (first 5 values)
-    # ------------------------------------------------------------------
+    # =====================================================================
     hist_vol = est.historical_vol()
     print("\n▶️  Historical conditional volatility (first 5 points):")
     print(hist_vol.head())
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Quick one‑liner usage example (no explicit estimator object)
-    # ------------------------------------------------------------------
+    # =====================================================================
     quick_vol = GarchVolatilityEstimator.quick_vol(price_series, cfg=dummy_cfg, steps=1)
     print(f"\n▶️  Quick‑vol (using classmethod) → {quick_vol:.6f}")
-
