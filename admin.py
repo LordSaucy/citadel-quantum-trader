@@ -21,7 +21,7 @@ async def info(token: str = Depends(get_current_user)):
     start_ts = datetime.datetime.fromtimestamp(
         os.stat("/proc/1").st_ctime
     )
-    uptime = datetime.datetime.utcnow() - start_ts
+    uptime = datetime.datetime.utcnow(datetime.timezone.utc) - start_ts
     # Git SHA – you can embed it at build time via an ARG in Dockerfile
     git_sha = os.getenv("GIT_SHA", "unknown")
     return InfoResponse(
