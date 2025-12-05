@@ -21,26 +21,29 @@ from typing import Dict, List, Tuple, Optional
 # ----------------------------------------------------------------------
 import MetaTrader5 as mt5
 import numpy as np
-from datetime import datetime
 
 # ----------------------------------------------------------------------
-# Logging – separate logger so you can control its level independently
+# Local utilities
+# ----------------------------------------------------------------------
+from src.utils.common import utc_now  # centralised UTC helper
+
+# ----------------------------------------------------------------------
+# Module logger (independent from the global app logger)
 # ----------------------------------------------------------------------
 candlestick_logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
-# USER‑DEFINED WEIGHTS (these can be overridden at runtime via the
-# ConfluenceController – see comments in the code)
+# USER‑DEFINED WEIGHTS (overrideable at runtime via ConfluenceController)
 # ----------------------------------------------------------------------
 PATTERN_WEIGHTS: Dict[str, float] = {
     # ⭐⭐⭐⭐⭐ Your favourites
-    "morning_star": 0.20,          # Most preferred
+    "morning_star": 0.20,
     "evening_star": 0.15,
 
     # ⭐⭐⭐⭐ Very good
     "morning_doji_star": 0.15,
     "evening_doji_star": 0.15,
-    "bullish_engulfing": 0.15,     # Must engulf ≥2 candles
+    "bullish_engulfing": 0.15,
     "bearish_engulfing": 0.15,
 
     # ⭐⭐⭐ Good
@@ -48,14 +51,7 @@ PATTERN_WEIGHTS: Dict[str, float] = {
     "inverted_hammer": 0.10,
     "hanging_man": 0.10,
     "shooting_star": 0.10,
-
-    # ❌ Removed (complete waste of time)
-    # "three_white_soldiers": 0.00,
-    # "three_black_crows": 0.00,
-    # "piercing_line": 0.00,
-    # "dark_cloud_cover": 0.00,
 }
-
 
 # ----------------------------------------------------------------------
 # Helper – fetch recent OHLCV bars from MT5
@@ -70,7 +66,7 @@ def _fetch_rates(
     Returns a NumPy structured array or ``None`` on failure.
     """
     rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
-    if rates is None or len(rates) == 0:
+    if not rates:
         candlestick_logger.error(
             f"Failed to fetch rates for {symbol} (tf={timeframe}, count={count})"
         )
@@ -79,127 +75,89 @@ def _fetch_rates(
 
 
 # ----------------------------------------------------------------------
+# Geometry helpers (pure functions – easy to unit‑test)
+# ----------------------------------------------------------------------
+def _body(candle: Dict) -> float:
+    """Absolute body size."""
+    return abs(candle["close"] - candle["open"])
+
+
+def _range(candle: Dict) -> float:
+    """Full high‑low range."""
+    return candle["high"] - candle["low"]
+
+
+def _midpoint(candle: Dict) -> float:
+    """Mid‑point of the candle (average of open & close)."""
+    return (candle["open"] + candle["close"]) / 2
+
+
+# ----------------------------------------------------------------------
 # Individual pattern detectors (pure functions – easier to unit‑test)
 # ----------------------------------------------------------------------
 def detect_morning_star(c1: Dict, c2: Dict, c3: Dict) -> bool:
-    """
-    Morning Star (your favourite)
-
-    1️⃣ Large bearish candle
-    2️⃣ Small‑body “star” (can be bullish or bearish)
-    3️⃣ Large bullish candle closing above the midpoint of candle 1
-    """
+    """Morning Star – bullish reversal (3‑candle pattern)."""
     # Candle 1 – large bearish
     bearish_1 = c1["close"] < c1["open"]
-    large_1 = abs(c1["close"] - c1["open"]) > (c1["high"] - c1["low"]) * 0.6
+    large_1 = _body(c1) > 0.6 * _range(c1)
 
-    # Candle 2 – small body
-    small_body = abs(c2["close"] - c2["open"]) < (c2["high"] - c2["low"]) * 0.3
+    # Candle 2 – small body (doji‑like)
+    small_body = _body(c2) < 0.3 * _range(c2)
 
     # Candle 3 – large bullish
     bullish_3 = c3["close"] > c3["open"]
-    large_3 = abs(c3["close"] - c3["open"]) > (c3["high"] - c3["low"]) * 0.6
+    large_3 = _body(c3) > 0.6 * _range(c3)
 
     # Close above midpoint of candle 1
-    closes_above_mid = c3["close"] > (c1["open"] + c1["close"]) / 2
+    closes_above_mid = c3["close"] > _midpoint(c1)
 
-    return (
-        bearish_1
-        and large_1
-        and small_body
-        and bullish_3
-        and large_3
-        and closes_above_mid
-    )
+    return all([bearish_1, large_1, small_body, bullish_3, large_3, closes_above_mid])
 
 
 def detect_evening_star(c1: Dict, c2: Dict, c3: Dict) -> bool:
-    """
-    Evening Star – mirror image of Morning Star (bearish reversal)
-    """
-    # Candle 1 – large bullish
+    """Evening Star – bearish reversal (mirror of Morning Star)."""
     bullish_1 = c1["close"] > c1["open"]
-    large_1 = abs(c1["close"] - c1["open"]) > (c1["high"] - c1["low"]) * 0.6
+    large_1 = _body(c1) > 0.6 * _range(c1)
 
-    # Candle 2 – small body
-    small_body = abs(c2["close"] - c2["open"]) < (c2["high"] - c2["low"]) * 0.3
+    small_body = _body(c2) < 0.3 * _range(c2)
 
-    # Candle 3 – large bearish
     bearish_3 = c3["close"] < c3["open"]
-    large_3 = abs(c3["close"] - c3["open"]) > (c3["high"] - c3["low"]) * 0.6
+    large_3 = _body(c3) > 0.6 * _range(c3)
 
-    # Close below midpoint of candle 1
-    closes_below_mid = c3["close"] < (c1["open"] + c1["close"]) / 2
+    closes_below_mid = c3["close"] < _midpoint(c1)
 
-    return (
-        bullish_1
-        and large_1
-        and small_body
-        and bearish_3
-        and large_3
-        and closes_below_mid
-    )
+    return all([bullish_1, large_1, small_body, bearish_3, large_3, closes_below_mid])
 
 
 def detect_morning_doji_star(c1: Dict, c2: Dict, c3: Dict) -> bool:
-    """
-    Morning Doji Star – same structure as Morning Star but the middle
-    candle is a Doji (very small body).
-    """
-    # Candle 1 – large bearish
+    """Morning Doji Star – same as Morning Star but middle candle is a Doji."""
     bearish_1 = c1["close"] < c1["open"]
-    large_1 = abs(c1["close"] - c1["open"]) > (c1["high"] - c1["low"]) * 0.6
+    large_1 = _body(c1) > 0.6 * _range(c1)
 
-    # Candle 2 – Doji (body < 10 % of range)
-    body = abs(c2["close"] - c2["open"])
-    rng = c2["high"] - c2["low"]
-    is_doji = body < rng * 0.10
+    # Doji: body < 10 % of range
+    is_doji = _body(c2) < 0.10 * _range(c2)
 
-    # Candle 3 – large bullish
     bullish_3 = c3["close"] > c3["open"]
-    large_3 = abs(c3["close"] - c3["open"]) > (c3["high"] - c3["low"]) * 0.6
+    large_3 = _body(c3) > 0.6 * _range(c3)
 
-    # Close above midpoint of candle 1
-    closes_above_mid = c3["close"] > (c1["open"] + c1["close"]) / 2
+    closes_above_mid = c3["close"] > _midpoint(c1)
 
-    return (
-        bearish_1
-        and large_1
-        and is_doji
-        and bullish_3
-        and large_3
-        and closes_above_mid
-    )
+    return all([bearish_1, large_1, is_doji, bullish_3, large_3, closes_above_mid])
 
 
 def detect_evening_doji_star(c1: Dict, c2: Dict, c3: Dict) -> bool:
-    """
-    Evening Doji Star – mirror image of Morning Doji Star.
-    """
-    # Candle 1 – large bullish
+    """Evening Doji Star – mirror of Morning Doji Star."""
     bullish_1 = c1["close"] > c1["open"]
-    large_1 = abs(c1["close"] - c1["open"]) > (c1["high"] - c1["low"]) * 0.6
+    large_1 = _body(c1) > 0.6 * _range(c1)
 
-    # Candle 2 – Doji
-    body = abs(c2["close"] - c2["open"])
-    rng = c2["high"] - c2["low"]
-    is_doji = body < rng * 0.10
+    is_doji = _body(c2) < 0.10 * _range(c2)
 
-    # Candle 3 – large bearish
     bearish_3 = c3["close"] < c3["open"]
-    large_3 = abs(c3["close"] - c3["open"]) > (c3["high"] - c3["low"]) * 0.6
+    large_3 = _body(c3) > 0.6 * _range(c3)
 
-    # Close below midpoint of candle 1
-    closes_below_mid = c3["close"] < (c1["open"] + c1["close"]) / 2
+    closes_below_mid = c3["close"] < _midpoint(c1)
 
-    return (
-        bullish_1
-        and large_1
-        and is_doji
-        and bearish_3
-        and large_3
-        and closes_below_mid
-    )
+    return all([bullish_1, large_1, is_doji, bearish_3, large_3, closes_below_mid])
 
 
 def detect_engulfing_multi_candle(
@@ -209,10 +167,16 @@ def detect_engulfing_multi_candle(
     min_candles: int = 2,
 ) -> bool:
     """
-    Engulfing pattern that must engulf at least ``min_candles`` previous
-    candles (your explicit requirement).
+    Engulfing pattern that must engulf at least ``min_candles`` previous candles.
 
-    Returns ``True`` if the condition is satisfied.
+    Args:
+        rates: NumPy structured array of OHLCV bars (chronological order).
+        idx: Index of the *current* candle to evaluate.
+        direction: ``"BULLISH"`` or ``"BEARISH"``.
+        min_candles: Minimum number of previous candles that must be engulfed.
+
+    Returns:
+        ``True`` if the condition is satisfied.
     """
     cur = rates[idx]
 
@@ -220,75 +184,56 @@ def detect_engulfing_multi_candle(
         # Current candle must be bullish
         if cur["close"] <= cur["open"]:
             return False
-
-        engulfed = 0
-        for i in range(1, 5):          # look back up to 4 candles
-            if idx - i < 0:
-                break
-            prev = rates[idx - i]
-            if cur["open"] <= prev["close"] and cur["close"] >= prev["open"]:
-                engulfed += 1
-            else:
-                break
+        # Check how many previous candles are fully engulfed
+        engulfed = sum(
+            1
+            for i in range(1, min_candles + 1)
+            if idx - i >= 0
+            and cur["open"] <= rates[idx - i]["close"]
+            and cur["close"] >= rates[idx - i]["open"]
+        )
         return engulfed >= min_candles
 
-    else:  # BEARISH
-        if cur["close"] >= cur["open"]:
-            return False
-
-        engulfed = 0
-        for i in range(1, 5):
-            if idx - i < 0:
-                break
-            prev = rates[idx - i]
-            if cur["open"] >= prev["close"] and cur["close"] <= prev["open"]:
-                engulfed += 1
-            else:
-                break
-        return engulfed >= min_candles
+    # ---- BEARISH branch -------------------------------------------------
+    if cur["close"] >= cur["open"]:
+        return False
+    engulfed = sum(
+        1
+        for i in range(1, min_candles + 1)
+        if idx - i >= 0
+        and cur["open"] >= rates[idx - i]["close"]
+        and cur["close"] <= rates[idx - i]["open"]
+    )
+    return engulfed >= min_candles
 
 
 def detect_hammer(candle: Dict) -> bool:
-    """
-    Hammer (bullish reversal) – small body, long lower shadow,
-    upper shadow ≤ 0.1 × body.
-    """
-    body = abs(candle["close"] - candle["open"])
-    lower_shadow = candle["open"] - candle["low"] if candle["close"] >= candle["open"] else candle["close"] - candle["low"]
-    upper_shadow = candle["high"] - candle["close"] if candle["close"] >= candle["open"] else candle["high"] - candle["open"]
-
+    """Hammer – small body, long lower shadow, short upper shadow."""
+    body = _body(candle)
     if body == 0:
         return False
+    lower_shadow = candle["open"] - candle["low"] if candle["close"] >= candle["open"] else candle["close"] - candle["low"]
+    upper_shadow = candle["high"] - candle["close"] if candle["close"] >= candle["open"] else candle["high"] - candle["open"]
     return lower_shadow >= 2 * body and upper_shadow <= 0.1 * body
 
 
 def detect_inverted_hammer(candle: Dict) -> bool:
-    """
-    Inverted Hammer – small body, long upper shadow,
-    lower shadow ≤ 0.1 × body.
-    """
-    body = abs(candle["close"] - candle["open"])
-    upper_shadow = candle["high"] - candle["close"] if candle["close"] >= candle["open"] else candle["high"] - candle["open"]
-    lower_shadow = candle["open"] - candle["low"] if candle["close"] >= candle["open"] else candle["close"] - candle["low"]
-
+    """Inverted Hammer – small body, long upper shadow, short lower shadow."""
+    body = _body(candle)
     if body == 0:
         return False
+    upper_shadow = candle["high"] - candle["close"] if candle["close"] >= candle["open"] else candle["high"] - candle["open"]
+    lower_shadow = candle["open"] - candle["low"] if candle["close"] >= candle["open"] else candle["close"] - candle["low"]
     return upper_shadow >= 2 * body and lower_shadow <= 0.1 * body
 
 
 def detect_hanging_man(candle: Dict) -> bool:
-    """
-    Hanging Man – same geometry as Hammer but appears in an up‑trend.
-    (We only check geometry here; trend detection is left to the caller.)
-    """
+    """Hanging Man – geometrically identical to Hammer (trend check is external)."""
     return detect_hammer(candle)
 
 
 def detect_shooting_star(candle: Dict) -> bool:
-    """
-    Shooting Star – same geometry as Inverted Hammer but appears in a down‑trend.
-    (Again, only geometry is checked here.)
-    """
+    """Shooting Star – geometrically identical to Inverted Hammer (trend check is external)."""
     return detect_inverted_hammer(candle)
 
 
@@ -297,11 +242,11 @@ def detect_shooting_star(candle: Dict) -> bool:
 # ----------------------------------------------------------------------
 class CandlestickPatternDetector:
     """
-    Detects candlestick patterns according to the user‑defined
-    preferences (weights, removed patterns, multi‑candle engulfing, …).
+    Detects candlestick patterns according to the user‑defined preferences
+    (weights, removed patterns, multi‑candle engulfing, …).
 
-    The public method ``detect_patterns(symbol, direction)`` returns a
-    dictionary that the rest of the system can consume:
+    Public method ``detect_patterns(symbol)`` returns a dictionary consumable by
+    the rest of the system:
 
     {
         "pattern_found": bool,
@@ -314,8 +259,8 @@ class CandlestickPatternDetector:
     def __init__(self, timeframe: int = mt5.TIMEFRAME_H1, lookback: int = 250):
         """
         Args:
-            timeframe: MT5 timeframe to analyse (default H1)
-            lookback: Number of candles to fetch (must be ≥ 3)
+            timeframe: MT5 timeframe to analyse (default H1).
+            lookback: Number of candles to fetch (must be ≥ 3).
         """
         self.timeframe = timeframe
         self.lookback = lookback
@@ -324,22 +269,66 @@ class CandlestickPatternDetector:
         )
 
     # ------------------------------------------------------------------
+    # Private helpers – keep the public API tiny and testable
+    # ------------------------------------------------------------------
+    def _collect_raw_detections(self, rates: np.ndarray) -> List[Tuple[str, bool, str]]:
+        """
+        Run every low‑level detector and return a list of tuples:
+
+        (pattern_name, is_detected, human_readable_description)
+        """
+        detections: List[Tuple[str, bool, str]] = []
+
+        # ---- 3‑candle patterns (need at least 3 bars) -----------------
+        if len(rates) >= 3:
+            c1, c2, c3 = rates[-3], rates[-2], rates[-1]
+            detections.extend(
+                [
+                    ("morning_star", detect_morning_star(c1, c2, c3), "Morning Star"),
+                    ("evening_star", detect_evening_star(c1, c2, c3), "Evening Star"),
+                    ("morning_doji_star", detect_morning_doji_star(c1, c2, c3), "Morning Doji Star"),
+                    ("evening_doji_star", detect_evening_doji_star(c1, c2, c3), "Evening Doji Star"),
+                ]
+            )
+
+        # ---- Multi‑candle engulfing (must engulf ≥2 previous candles) --
+        for idx in range(len(rates)):
+            if detect_engulfing_multi_candle(rates, idx, direction="BULLISH"):
+                detections.append(("bullish_engulfing", True, "Bullish Engulfing (≥2 candles)"))
+                        # ---- Bearish engulfing (same loop, opposite direction) ----
+                if detect_engulfing_multi_candle(rates, idx, direction="BEARISH"):
+                    detections.append(
+                        ("bearish_engulfing", True, "Bearish Engulfing (≥2 candles)")
+                    )
+
+        # ---- Single‑candle patterns (evaluate only the most recent bar) ----
+        last = rates[-1]
+        detections.extend(
+            [
+                ("hammer", detect_hammer(last), "Hammer"),
+                ("inverted_hammer", detect_inverted_hammer(last), "Inverted Hammer"),
+                ("hanging_man", detect_hanging_man(last), "Hanging Man"),
+                ("shooting_star", detect_shooting_star(last), "Shooting Star"),
+            ]
+        )
+        return detections
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def detect_patterns(self, symbol: str, direction: str) -> Dict:
+    def detect_patterns(self, symbol: str) -> Dict:
         """
         Scan the most recent bars for the *best* pattern according to the
         weighted scheme.
 
         Args:
-            symbol: Trading symbol (e.g. "EURUSD")
-            direction: "BUY" or "SELL" – used for engulfing orientation
+            symbol: Trading symbol (e.g. "EURUSD").
 
         Returns:
             dict with keys:
                 - pattern_found (bool)
                 - pattern_name (str | None)
-                - pattern_score (float, 0‑100 weighted)
+                - pattern_score (float, 0‑100)
                 - pattern_description (str | None)
         """
         rates = _fetch_rates(symbol, self.timeframe, self.lookback)
@@ -352,69 +341,36 @@ class CandlestickPatternDetector:
             }
 
         # ------------------------------------------------------------------
-        # 1️⃣  Gather raw detections (True/False) for every pattern
+        # 1️⃣  Gather raw detections
         # ------------------------------------------------------------------
-        detections: List[Tuple[str, bool, str]] = []   # (name, found?, description)
+        raw_detections = self._collect_raw_detections(rates)
 
-        # --- Morning / Evening Star (3‑candle patterns) ---
-        if len(rates) >= 3:
-            c1, c2, c3 = rates[-3], rates[-2], rates[-1]
-            detections.append(
-                ("morning_star", detect_morning_star(c1, c2, c3), "Morning Star")
-            )
-            detections.append(
-                ("evening_star", detect_evening_star(c1, c2, c3), "Evening Star")
-            )
-            detections.append(
-                ("morning_doji_star", detect_morning_doji_star(c1, c2, c3), "Morning Doji Star")
-            )
-            detections.append(
-                ("evening_doji_star", detect_evening_doji_star(c1, c2, c3), "Evening Doji Star")
-            )
-
-        # --- Multi‑candle engulfing (requires at least 2 previous candles) ---
-        for idx in range(len(rates)):
-            if detect_engulfing_multi_candle(rates, idx, direction="BULLISH"):
-                detections.append(("bullish_engulfing", True, "Bullish Engulfing (≥2 candles)"))
-            if detect_engulfing_multi_candle(rates, idx, direction="BEARISH"):
-                detections.append(("bearish_engulfing", True, "Bearish Engulfing (≥2 candles)"))
-
-        # --- Single‑candle patterns (last candle only) ---
-        last = rates[-1]
-        detections.append(("hammer", detect_hammer(last), "Hammer"))
-        detections.append(("inverted_hammer", detect_inverted_hammer(last), "Inverted Hammer"))
-        detections.append(("hanging_man", detect_hanging_man(last), "Hanging Man"))
-        detections.append(("shooting_star", detect_shooting_star(last), "Shooting Star"))
-
-            # ------------------------------------------------------------------
-        # 2️⃣  Compute weighted score for each *found* pattern
         # ------------------------------------------------------------------
-        for name, found, description in detections:
+        # 2️⃣  Compute weighted score for each *detected* pattern
+        # ------------------------------------------------------------------
+        best: Optional[Tuple[str, float, str]] = None  # (name, weighted_score, description)
+
+        for name, found, description in raw_detections:
             if not found:
                 continue
 
-            # The weight dictionary expresses the *relative importance* of each
-            # pattern (0 … 1).  A weight of 0 means the pattern is deliberately
-            # ignored (e.g. “three white soldiers”).  The final contribution
-            # to the score is therefore:  weight × 100.
-            raw_weight = PATTERN_WEIGHTS.get(name, 0.0)
-
-            # Guard against accidental zero‑weight patterns – they simply do not
-            # affect the score.
-            if raw_weight <= 0.0:
+            # Weight expressed as a fraction (0 … 1).  Zero weight means the pattern
+            # is intentionally ignored (e.g. three‑soldiers).
+            weight = PATTERN_WEIGHTS.get(name, 0.0)
+            if weight <= 0.0:
                 continue
 
-            weighted_score = raw_weight * 100.0
+            # Convert to a 0‑100 scale for downstream consumption.
+            weighted_score = weight * 100.0
 
-            # Keep the pattern with the *highest* weighted contribution.
-            if best_pattern is None or weighted_score > best_pattern[1]:
-                best_pattern = (name, weighted_score, description)
+            # Keep the pattern with the highest weighted contribution.
+            if best is None or weighted_score > best[1]:
+                best = (name, weighted_score, description)
 
         # ------------------------------------------------------------------
         # 3️⃣  Build the final result dictionary
         # ------------------------------------------------------------------
-        if best_pattern is None:
-            # No pattern survived the weight filter – treat as “no signal”.
+        if best is None:
             return {
                 "pattern_found": False,
                 "pattern_name": None,
@@ -422,16 +378,16 @@ class CandlestickPatternDetector:
                 "pattern_description": "No qualifying candlestick pattern detected",
             }
 
-        pattern_name, pattern_score, pattern_desc = best_pattern
-
+        pattern_name, pattern_score, pattern_desc = best
         return {
             "pattern_found": True,
             "pattern_name": pattern_name,
-            "pattern_score": round(pattern_score, 2),   # 0‑100 scale
+            "pattern_score": round(pattern_score, 2),  # keep two decimals
             "pattern_description": pattern_desc,
         }
 
+
 # ----------------------------------------------------------------------
-# Global singleton – import this from ``src/main.py`` and use it directly
+# Global singleton – import this from `src/main.py` and use it directly
 # ----------------------------------------------------------------------
 candlestick_pattern_detector = CandlestickPatternDetector()
