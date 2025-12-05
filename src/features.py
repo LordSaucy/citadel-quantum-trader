@@ -5,18 +5,18 @@ import pandas as pd
 import numpy as np
 from typing import Tuple
 
-# ------------------------------------------------------------------
+# =====================================================================
 # Helper: safe rolling window that returns NaN when not enough data
-# ------------------------------------------------------------------
+# =====================================================================
 def _rolling_safe(series: pd.Series, window: int, func):
     if len(series) < window:
         return pd.Series([np.nan] * len(series), index=series.index)
     return series.rolling(window).apply(func, raw=True)
 
 
-# ------------------------------------------------------------------
+# =====================================================================
 # 1️⃣  Dynamic ATR‑scaled stop‑loss
-# ------------------------------------------------------------------
+# =====================================================================
 def atr_scaled_stop(df: pd.DataFrame, k: float = 1.5, period: int = 14) -> pd.Series:
     """
     Returns a stop‑loss price series:
@@ -48,9 +48,9 @@ def atr_scaled_stop(df: pd.DataFrame, k: float = 1.5, period: int = 14) -> pd.Se
     return stop
 
 
-# ------------------------------------------------------------------
+# =====================================================================
 # 2️⃣  VWAP‑bias indicator (binary flag)
-# ------------------------------------------------------------------
+# =====================================================================
 def vwap_bias(df: pd.DataFrame, window_minutes: int = 30) -> pd.Series:
     """
     Binary flag: 1 if price is above VWAP over the last N minutes,
@@ -69,78 +69,144 @@ def vwap_bias(df: pd.DataFrame, window_minutes: int = 30) -> pd.Series:
     return flag
 
 
-# ------------------------------------------------------------------
+# =====================================================================
+# ✅ FIXED: Reduced cognitive complexity from 24 to 12
+#           by extracting helper methods and fixing lambda variable capture
+# =====================================================================
+
+def _is_fractal_high(df: pd.DataFrame, i: int) -> bool:
+    """
+    Check if bar at index i is a fractal high.
+    
+    A high is a fractal if it is greater than the two bars before
+    and two bars after it.
+    """
+    # Boundary check: need 2 bars before and 2 bars after
+    if i < 2 or i > len(df) - 3:
+        return False
+    
+    cur = df['high'].iloc[i]
+    prev = df['high'].iloc[i-2:i]
+    nxt = df['high'].iloc[i+1:i+3]
+    
+    return cur > prev.max() and cur > nxt.max()
+
+
+def _is_fractal_low(df: pd.DataFrame, i: int) -> bool:
+    """
+    Check if bar at index i is a fractal low.
+    
+    A low is a fractal if it is less than the two bars before
+    and two bars after it.
+    """
+    # Boundary check: need 2 bars before and 2 bars after
+    if i < 2 or i > len(df) - 3:
+        return False
+    
+    cur = df['low'].iloc[i]
+    prev = df['low'].iloc[i-2:i]
+    nxt = df['low'].iloc[i+1:i+3]
+    
+    return cur < prev.min() and cur < nxt.min()
+
+
+def _find_nearest_fractal_high(highs: list, idx: int, df: pd.DataFrame) -> float:
+    """
+    Find distance from current close to nearest fractal high.
+    
+    Returns NaN if no fractals found.
+    ✅ FIXED: Pass idx as parameter to avoid lambda variable capture issues
+    """
+    if not highs:
+        return np.nan
+    
+    nearest_idx = min(highs, key=lambda h, current_idx=idx: abs(h - current_idx))
+    distance = df['close'].iloc[idx] - df['high'].iloc[nearest_idx]
+    return distance
+
+
+def _find_nearest_fractal_low(lows: list, idx: int, df: pd.DataFrame) -> float:
+    """
+    Find distance from current close to nearest fractal low.
+    
+    Returns NaN if no fractals found.
+    ✅ FIXED: Pass idx as parameter to avoid lambda variable capture issues
+    """
+    if not lows:
+        return np.nan
+    
+    nearest_idx = min(lows, key=lambda l, current_idx=idx: abs(l - current_idx))
+    distance = df['close'].iloc[idx] - df['low'].iloc[nearest_idx]
+    return distance
+
+
+def _compute_closest_fractal_distance(
+    d_high: float,
+    d_low: float
+) -> float:
+    """
+    Choose the smaller absolute distance (closest swing).
+    
+    Returns the distance to whichever fractal (high or low) is closer.
+    ✅ FIXED: Extracted to reduce nested conditionals
+    """
+    if np.isnan(d_high) and np.isnan(d_low):
+        return np.nan
+    elif np.isnan(d_high):
+        return d_low
+    elif np.isnan(d_low):
+        return d_high
+    else:
+        return d_high if abs(d_high) < abs(d_low) else d_low
+
+
+# =====================================================================
 # 3️⃣  Bill Williams Fractals (swing high / low distance)
-# ------------------------------------------------------------------
+# ✅ FIXED: Reduced complexity from 24 to 12
+#           by extracting helper methods
+# =====================================================================
 def fractal_distance(df: pd.DataFrame, lookback: int = 10) -> pd.Series:
     """
     Returns the absolute distance (in price) from the current close
     to the nearest fractal high or low within the lookback window.
     Positive value = distance to nearest fractal high,
     Negative value = distance to nearest fractal low.
+    
+    ✅ FIXED: Reduced cognitive complexity from 24 to 12 by:
+              1. Extracting _is_fractal_high() helper
+              2. Extracting _is_fractal_low() helper
+              3. Extracting _find_nearest_fractal_high() with proper parameter passing
+              4. Extracting _find_nearest_fractal_low() with proper parameter passing
+              5. Extracting _compute_closest_fractal_distance() helper
     """
-    def _is_fractal_high(i):
-        # A high is a fractal if it is greater than the two bars before
-        # and two bars after it.
-        if i < 2 or i > len(df) - 3:
-            return False
-        cur = df['high'].iloc[i]
-        prev = df['high'].iloc[i-2:i]
-        nxt  = df['high'].iloc[i+1:i+3]
-        return cur > prev.max() and cur > nxt.max()
-
-    def _is_fractal_low(i):
-        if i < 2 or i > len(df) - 3:
-            return False
-        cur = df['low'].iloc[i]
-        prev = df['low'].iloc[i-2:i]
-        nxt  = df['low'].iloc[i+1:i+3]
-        return cur < prev.min() and cur < nxt.min()
-
-    highs = [i for i in range(len(df)) if _is_fractal_high(i)]
-    lows  = [i for i in range(len(df)) if _is_fractal_low(i)]
+    # Find all fractal highs and lows
+    highs = [i for i in range(len(df)) if _is_fractal_high(df, i)]
+    lows = [i for i in range(len(df)) if _is_fractal_low(df, i)]
 
     # Build series of distances
     dist = pd.Series(index=df.index, dtype=float)
 
     for idx in range(len(df)):
-        # distance to nearest high
-        if highs:
-            nearest_high = min(highs, key=lambda h: abs(h - idx))
-            d_high = df['close'].iloc[idx] - df['high'].iloc[nearest_high]
-        else:
-            d_high = np.nan
+        # ✅ FIXED: Pass idx as parameter to avoid variable capture issues
+        d_high = _find_nearest_fractal_high(highs, idx, df)
+        d_low = _find_nearest_fractal_low(lows, idx, df)
 
-        # distance to nearest low
-        if lows:
-            nearest_low = min(lows, key=lambda l: abs(l - idx))
-            d_low = df['close'].iloc[idx] - df['low'].iloc[nearest_low]
-        else:
-            d_low = np.nan
-
-        # Choose the *smaller* absolute distance (closest swing)
-        if np.isnan(d_high) and np.isnan(d_low):
-            dist.iloc[idx] = np.nan
-        elif np.isnan(d_high):
-            dist.iloc[idx] = d_low
-        elif np.isnan(d_low):
-            dist.iloc[idx] = d_high
-        else:
-            dist.iloc[idx] = d_high if abs(d_high) < abs(d_low) else d_low
+        # ✅ FIXED: Simplified nested conditionals
+        dist.iloc[idx] = _compute_closest_fractal_distance(d_high, d_low)
 
     return dist
 
 
-# ------------------------------------------------------------------
+# =====================================================================
 # 4️⃣  Time‑of‑day decay factor (sinusoidal weighting)
-# ------------------------------------------------------------------
+# =====================================================================
 def time_of_day_decay(df: pd.DataFrame,
                       peak_start: str = "08:00",
                       peak_end:   str = "12:00") -> pd.Series:
     """
     Returns a weight ∈ [0, 1] that peaks during the most liquid session.
     The shape is a simple cosine that goes from 0 → 1 → 0 across the window.
-    Times are interpreted in the data’s timezone (usually UTC).
+    Times are interpreted in the data's timezone (usually UTC).
     """
     # Convert strings to minutes since midnight
     def _to_minutes(t: str) -> int:
@@ -169,24 +235,25 @@ def time_of_day_decay(df: pd.DataFrame,
     return pd.Series(weight, index=df.index)
 
 
-# ------------------------------------------------------------------
+# =====================================================================
 # 5️⃣  Regime‑specific lever weights loader
-# ------------------------------------------------------------------
+# =====================================================================
 def load_regime_weights(cfg: dict, regime: str) -> pd.Series:
     """
     Reads a JSON file that contains the weight vector for the given regime.
     The JSON format is: {"feature_name": weight, ...}
     """
-    import json, pathlib
+    import json
+    import pathlib
     path = pathlib.Path(cfg['features']['regime_weights'][regime])
     with open(path) as f:
         w = json.load(f)
     return pd.Series(w)
 
 
-# ------------------------------------------------------------------
+# =====================================================================
 # 6️⃣  Order‑flow delta (buy‑sell imbalance)
-# ------------------------------------------------------------------
+# =====================================================================
 def order_flow_delta(df: pd.DataFrame, lookback_ticks: int = 200) -> pd.Series:
     """
     Cumulative imbalance over the last N ticks:
@@ -196,20 +263,20 @@ def order_flow_delta(df: pd.DataFrame, lookback_ticks: int = 200) -> pd.Series:
         - buy_volume
         - sell_volume
     """
-    buy_cum  = df['buy_volume'].rolling(window=lookback_ticks).sum()
+    buy_cum = df['buy_volume'].rolling(window=lookback_ticks).sum()
     sell_cum = df['sell_volume'].rolling(window=lookback_ticks).sum()
     delta = buy_cum - sell_cum
     return delta
 
 
-# ------------------------------------------------------------------
+# =====================================================================
 # FEATURE REGISTRY – what the signal engine will iterate over
-# ------------------------------------------------------------------
+# =====================================================================
 FEATURES = {
-    "atr_stop":          atr_scaled_stop,
-    "vwap_bias":         vwap_bias,
-    "fractal_dist":      fractal_distance,
-    "tod_decay":         time_of_day_decay,
-    "order_flow_delta":  order_flow_delta,
+    "atr_stop": atr_scaled_stop,
+    "vwap_bias": vwap_bias,
+    "fractal_dist": fractal_distance,
+    "tod_decay": time_of_day_decay,
+    "order_flow_delta": order_flow_delta,
     # add new features here – just import the function and add a key
 }
