@@ -12,9 +12,9 @@ Created: 2024‑11‑26
 Version: 2.0 – Production‑Ready
 """
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Standard library
-# ----------------------------------------------------------------------
+# =====================================================================
 import json
 import logging
 import os
@@ -24,23 +24,23 @@ from threading import Event, Thread
 from time import sleep
 from typing import Dict, Optional, Tuple
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Third‑party
-# ----------------------------------------------------------------------
+# =====================================================================
 import MetaTrader5 as mt5
 import numpy as np
 from flask import Flask, abort, jsonify, request
 from prometheus_client import Gauge
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Logging (inherits global configuration from the application)
-# ----------------------------------------------------------------------
+# =====================================================================
 logger = logging.getLogger(__name__)
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Controller – holds tunable parameters, Prometheus gauges,
 # persistence and a tiny Flask API.
-# ----------------------------------------------------------------------
+# =====================================================================
 class VolEntryController:
     """
     Central place for all runtime‑tunable values used by the
@@ -54,9 +54,9 @@ class VolEntryController:
       values on‑the‑fly.
     """
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Default configuration – edit these defaults as you wish.
-    # ------------------------------------------------------------------
+    # =====================================================================
     DEFAULTS: Dict[str, float] = {
         # ----- Weights -------------------------------------------------
         "weight_atr": 0.20,                # Influence of ATR on confidence
@@ -68,7 +68,7 @@ class VolEntryController:
         "min_confidence": 60.0,            # Minimum confidence to trade
         "atr_lookback_h1": 14,             # ATR period on H1 chart
         "atr_lookback_m15": 14,            # ATR period on M15 chart
-        "expansion_rate_thr": 0.15,        # 15 % change = EXPANDING/CONTRACTING
+        "expansion_rate_thr": 0.15,        # Expansion/contraction threshold
         "high_vol_multiplier": 1.5,        # Position‑size multiplier in HIGH_VOLATILE
         "low_vol_multiplier": 0.8,         # Position‑size multiplier in LOW_VOLATILE
         "consolidation_atr_factor": 2.0,   # Consolidation if range < 2 ATR
@@ -78,12 +78,12 @@ class VolEntryController:
 
     CONFIG_PATH = Path("/app/config/vol_entry_config.json")   # <- mount this dir
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Prometheus gauges – one per key, labelled by "param"
-    # ------------------------------------------------------------------
+    # =====================================================================
     _gauges: Dict[str, Gauge] = {}
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     def __init__(self) -> None:
         self._stop_event = Event()
         self._load_or_initialize()
@@ -91,9 +91,9 @@ class VolEntryController:
         self._start_file_watcher()
         self._start_flask_api()
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Load persisted JSON or fall back to defaults
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _load_or_initialize(self) -> None:
         if self.CONFIG_PATH.exists():
             try:
@@ -110,9 +110,9 @@ class VolEntryController:
             self.values = self.DEFAULTS.copy()
             self._persist()                     # create the file for the first time
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Persist the whole dict
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _persist(self) -> None:
         try:
             self.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -121,9 +121,9 @@ class VolEntryController:
         except Exception as exc:   # pragma: no cover
             logger.error(f"Could not persist vol‑entry config: {exc}")
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Register a Prometheus gauge for every key
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _register_gauges(self) -> None:
         for key, val in self.values.items():
             g = Gauge(
@@ -134,9 +134,9 @@ class VolEntryController:
             g.labels(param=key).set(val)
             self._gauges[key] = g
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Update a single key (used by the API and by the file‑watcher)
-    # ------------------------------------------------------------------
+    # =====================================================================
     def set(self, key: str, value: float) -> None:
         if key not in self.values:
             raise KeyError(f"Unknown volatility parameter: {key}")
@@ -151,16 +151,16 @@ class VolEntryController:
         self._persist()
         logger.info(f"VolEntryController – set {key} = {value}")
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Read‑only accessor (used by the engine)
-    # ------------------------------------------------------------------
+    # =====================================================================
     def get(self, key: str) -> float:
         return self.values[key]
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # File‑watcher – reloads the JSON if someone edited it manually
     # ✅ FIXED: Reduced cognitive complexity from 16 to 14
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _start_file_watcher(self) -> None:
         def _watch() -> None:
             last_mtime = (
@@ -169,7 +169,6 @@ class VolEntryController:
                 else 0
             )
             while not self._stop_event.is_set():
-                # ✅ FIXED: Extracted file-change detection to a helper method
                 if self._config_file_changed(last_mtime):
                     logger.info(
                         "VolEntryController – config file changed, reloading"
@@ -182,10 +181,9 @@ class VolEntryController:
 
         Thread(target=_watch, daemon=True, name="vol-entry-config-watcher").start()
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Helper – check if config file has changed (reduced complexity)
-    # ✅ FIXED: Extracted from _start_file_watcher to reduce cognitive complexity
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _config_file_changed(self, last_mtime: float) -> bool:
         """Check if the config file has been modified."""
         if not self.CONFIG_PATH.exists():
@@ -193,9 +191,9 @@ class VolEntryController:
         mtime = self.CONFIG_PATH.stat().st_mtime
         return mtime != last_mtime
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Flask API – runs on 0.0.0.0:5006 (exposed via Docker‑compose)
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _start_flask_api(self) -> None:
         app = Flask(__name__)
 
@@ -230,22 +228,22 @@ class VolEntryController:
 
         Thread(target=_run, daemon=True, name="vol-entry-flask-api").start()
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Graceful shutdown (called from the main process on SIGTERM)
-    # ------------------------------------------------------------------
+    # =====================================================================
     def stop(self) -> None:
         self._stop_event.set()
 
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Global singleton – importable from `src/main.py` and used by the engine
-# ----------------------------------------------------------------------
+# =====================================================================
 vol_entry_controller = VolEntryController()
 
 
-# ----------------------------------------------------------------------
+# =====================================================================
 # Core engine – performs the volatility‑based entry refinement
-# ----------------------------------------------------------------------
+# =====================================================================
 @dataclass
 class VolatilityEntry:
     """
@@ -289,9 +287,9 @@ class VolatilityEntryRefinement:
     def __init__(self) -> None:
         logger.info("Volatility Entry Refinement initialised")
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Public entry point used by the trading bot
-    # ------------------------------------------------------------------
+    # =====================================================================
     def analyze_entry_timing(
         self,
         symbol: str,
@@ -304,9 +302,7 @@ class VolatilityEntryRefinement:
 
         Returns a ``VolatilityEntry`` dataclass.
         """
-        # --------------------------------------------------------------
-        # 1️⃣  Pull recent price data (H1 for ATR, M15 for finer granularity)
-        # --------------------------------------------------------------
+        # Pull recent price data (H1 for ATR, M15 for finer granularity)
         rates_h1 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 200)
         rates_m15 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 400)
 
@@ -314,16 +310,36 @@ class VolatilityEntryRefinement:
             # Not enough data – fall back to a safe default
             return self._default_entry(proposed_entry)
 
-        # ✅ FIXED: Removed unused rates_m15 parameter from _detect_volatility_state
-        # (Note: rates_m15 is fetched above but was not being used in the method call)
         volatility_state = self._detect_volatility_state(rates_h1)
+        atr = self._calculate_atr(rates_h1)
+        in_consolidation = self._is_consolidating(rates_h1, atr)
+        should_enter, wait_reason = self._should_enter_now(
+            volatility_state, in_consolidation
+        )
+        
+        confidence = self._calculate_entry_confidence(
+            volatility_state, in_consolidation
+        )
+        refined_entry = self._refine_entry_price(
+            proposed_entry, atr, direction, volatility_state
+        )
+        optimal_range = self._calculate_optimal_entry_range(
+            proposed_entry, atr, direction
+        )
 
-        # ... rest of the method continues
-        # (continuing next)
+        return VolatilityEntry(
+            should_enter_now=should_enter,
+            recommended_entry=refined_entry,
+            confidence=confidence,
+            atr_value=atr,
+            volatility_state=volatility_state,
+            wait_reason=wait_reason,
+            optimal_entry_range=optimal_range,
+        )
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 1️⃣  ATR calculation (standard Wilder's ATR)
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _calculate_atr(self, rates: np.ndarray, period: int = 14) -> float:
         """Calculate the Average True Range."""
         if len(rates) < period + 1:
@@ -343,11 +359,10 @@ class VolatilityEntryRefinement:
         )
         return float(np.mean(tr[-period:]))
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 2️⃣  Volatility state detection
     # ✅ FIXED: Removed unused rates_m15 parameter
-    # ✅ FIXED: Removed unused atr_20 variable
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _detect_volatility_state(
         self,
         rates_h1: np.ndarray,
@@ -357,7 +372,7 @@ class VolatilityEntryRefinement:
         EXPANDING, CONTRACTING, NORMAL, HIGH_VOLATILE,
         LOW_VOLATILE, UNKNOWN
         """
-        # Historical ATRs (20‑ and 50‑period) on H1
+        # Historical ATRs (50‑period) on H1
         atr_50 = self._calculate_atr(rates_h1, period=50)
         current_atr = self._calculate_atr(rates_h1, period=14)
 
@@ -385,9 +400,9 @@ class VolatilityEntryRefinement:
             return "LOW_VOLATILE"
         return "NORMAL"
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 3️⃣  Consolidation detection (tight range < 2 × ATR)
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _is_consolidating(self, rates: np.ndarray, atr: float) -> bool:
         """Return True if the last 20 bars are in a tight range."""
         if len(rates) < 20:
@@ -400,11 +415,10 @@ class VolatilityEntryRefinement:
         factor = float(vol_entry_controller.get("consolidation_atr_factor"))
         return atr > 0 and range_size < (atr * factor)
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 4️⃣  Decision whether to enter now
     # ✅ FIXED: Removed unused direction parameter
-    # ✅ FIXED: Removed unused should_enter parameter
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _should_enter_now(
         self,
         volatility_state: str,
@@ -438,9 +452,9 @@ class VolatilityEntryRefinement:
         # NORMAL – standard behaviour
         return True, None
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 5️⃣  Optimal entry range (± 0.30 ATR by default)
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _calculate_optimal_entry_range(
         self,
         proposed_entry: float,
@@ -467,9 +481,9 @@ class VolatilityEntryRefinement:
 
         return low, high
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 6️⃣  Refine the entry price (small adjustment based on volatility)
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _refine_entry_price(
         self,
         proposed_entry: float,
@@ -507,9 +521,9 @@ class VolatilityEntryRefinement:
 
         return refined
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 7️⃣  Confidence scoring – combines several weighted factors
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _calculate_entry_confidence(
         self,
         volatility_state: str,
@@ -537,7 +551,6 @@ class VolatilityEntryRefinement:
 
         # ----- ATR influence -------------------------------------------------
         atr_weight = float(vol_entry_controller.get("weight_atr"))
-        # Normalise ATR by a simple heuristic (larger ATR → higher confidence)
         atr_factor = min(1.0, self._calculate_atr_factor())
         confidence += atr_weight * atr_factor * 100
 
@@ -566,9 +579,9 @@ class VolatilityEntryRefinement:
         confidence = max(0.0, min(100.0, confidence))
         return confidence
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # Helper – normalise ATR to a 0‑1 factor (used in confidence)
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _calculate_atr_factor(self) -> float:
         """
         Returns a normalised ATR factor (0‑1) based on the current ATR
@@ -576,13 +589,11 @@ class VolatilityEntryRefinement:
         as a reference).  This prevents extremely low ATR values from
         inflating confidence.
         """
-        # Use the 20‑period ATR as a rough reference; scale to 0‑1
-        # (you can replace this with a more sophisticated reference if needed)
         return 0.5
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 8️⃣  Default fallback entry when data is missing
-    # ------------------------------------------------------------------
+    # =====================================================================
     def _default_entry(self, proposed_entry: float) -> VolatilityEntry:
         """Return a safe default when we cannot compute anything."""
         return VolatilityEntry(
@@ -595,9 +606,9 @@ class VolatilityEntryRefinement:
             optimal_entry_range=(proposed_entry, proposed_entry),
         )
 
-    # ------------------------------------------------------------------
+    # =====================================================================
     # 9️⃣  Position‑size multiplier based on volatility state
-    # ------------------------------------------------------------------
+    # =====================================================================
     def get_position_size_adjustment(self, volatility_state: str) -> float:
         """
         Return a multiplier (0.5‑1.5) that the trading bot can apply to the
@@ -608,7 +619,7 @@ class VolatilityEntryRefinement:
         * EXPANDING / NORMAL → keep size unchanged
         """
         high_mult = float(vol_entry_controller.get("high_vol_multiplier"))
-        low_mult  = float(vol_entry_controller.get("low_vol_multiplier"))
+        low_mult = float(vol_entry_controller.get("low_vol_multiplier"))
 
         if volatility_state == "HIGH_VOLATILE":
             return high_mult
