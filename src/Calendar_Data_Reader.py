@@ -19,6 +19,8 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
+from datetime import datetime, timezone
+
 
 # ----------------------------------------------------------------------
 # Third‑party
@@ -134,7 +136,7 @@ class CalendarDataReader:
         # 2.1  Return cached data if it is still fresh
         # ------------------------------------------------------------------
         if self._cached_data and self._last_read:
-            age = (datetime.utcnow() - self._last_read).total_seconds()
+            age = (datetime.utcnow(timezone.utc) - self._last_read).total_seconds()
             if age < self._CACHE_TIMEOUT:
                 return self._cached_data
 
@@ -153,8 +155,8 @@ class CalendarDataReader:
         # ------------------------------------------------------------------
         # 2.3  Discard stale files (older than ``max_age_seconds``)
         # ------------------------------------------------------------------
-        file_mtime = datetime.utcfromtimestamp(file_path.stat().st_mtime)
-        age = (datetime.utcnow() - file_mtime).total_seconds()
+        file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
+        age = (datetime.utcnow(timezone.utc) - file_mtime).total_seconds()
         if age > max_age_seconds:
             logger.warning(
                 f"Calendar data is stale ({int(age)} s old, "
@@ -168,7 +170,7 @@ class CalendarDataReader:
         data = self._read_json_file(file_path)
         if data is not None:
             self._cached_data = data
-            self._last_read = datetime.utcnow()
+            self._last_read = datetime.utcnow(timezone.utc)
         return data
 
     # ------------------------------------------------------------------
@@ -208,7 +210,7 @@ class CalendarDataReader:
         if not raw or "events" not in raw:
             return []
 
-        now = datetime.utcnow()
+        now = datetime.utcnow(timezone.utc)
         cutoff = now + timedelta(hours=hours_ahead)
         events: List[NewsEvent] = []
 
@@ -221,7 +223,7 @@ class CalendarDataReader:
         }
 
         for ev in raw["events"]:
-            ev_time = datetime.utcfromtimestamp(ev.get("time", 0))
+            ev_time = datetime.fromtimestamp(ev.get("time", 0), tz=timezone.utc)
             if ev_time > cutoff:
                 continue
 
@@ -273,7 +275,7 @@ class CalendarDataReader:
         base_cur = symbol[:3].upper()
         quote_cur = symbol[3:6].upper()
 
-        now = datetime.utcnow()
+        now = datetime.utcnow(timezone.utc)
         for ev in data.get("events", []):
             # Skip inactive events
             if not ev.get("is_active"):
@@ -326,7 +328,7 @@ class CalendarDataReader:
         if not file_path.is_file():
             return False
 
-        age = (datetime.utcnow() - datetime.utcfromtimestamp(file_path.stat().st_mtime)).total_seconds()
+        age = (datetime.utcnow(timezone.utc) - datetime.fromtimestamp(file_path.stat().st_mtime,tz=timezone.utc)).total_seconds()
         return age < 300   # 5 minutes
 
 # ----------------------------------------------------------------------
