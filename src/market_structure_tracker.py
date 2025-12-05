@@ -401,13 +401,13 @@ class MarketStructureTracker:
     def _classify_bullish_regime(
         self,
         last_high: StructurePoint,
-        prev_high: StructurePoint,
         last_low: StructurePoint,
-        prev_low: StructurePoint,
         current_price: float,
     ) -> Tuple[str, StructurePoint]:
         """
         Classify BULLISH regime (HH + HL).
+        
+        ✅ FIXED: Removed unused parameters `prev_high` and `prev_low`
         
         Returns (regime_type, last_structure_point)
         """
@@ -434,13 +434,13 @@ class MarketStructureTracker:
     def _classify_bearish_regime(
         self,
         last_high: StructurePoint,
-        prev_high: StructurePoint,
         last_low: StructurePoint,
-        prev_low: StructurePoint,
         current_price: float,
     ) -> Tuple[str, StructurePoint]:
         """
         Classify BEARISH regime (LH + LL).
+        
+        ✅ FIXED: Removed unused parameters `prev_high` and `prev_low`
         
         Returns (regime_type, last_structure_point)
         """
@@ -526,15 +526,17 @@ class MarketStructureTracker:
         # Classify the regime based on high/low relationships
         if last_high.price > prev_high.price and last_low.price > prev_low.price:
             # BULLISH case (HH + HL)
+            # ✅ FIXED: Removed prev_high and prev_low arguments
             regime_type, last_structure = self._classify_bullish_regime(
-                last_high, prev_high, last_low, prev_low, current_price
+                last_high, last_low, current_price
             )
             prev_structure = prev_low
 
         elif last_high.price < prev_high.price and last_low.price < prev_low.price:
             # BEARISH case (LH + LL)
+            # ✅ FIXED: Removed prev_high and prev_low arguments
             regime_type, last_structure = self._classify_bearish_regime(
-                last_high, prev_high, last_low, prev_low, current_price
+                last_high, last_low, current_price
             )
             prev_structure = prev_high
 
