@@ -192,7 +192,7 @@ class MarketDataManager:
                             with ts_path.open("r") as fh:
                                 ts_iso = fh.read().strip()
                             ts = datetime.fromisoformat(ts_iso)
-                            if (datetime.utcnow() - ts).total_seconds() < self.cache_ttl:
+                            if (datetime.now() - ts).total_seconds() < self.cache_ttl:
                                 # Fresh enough – promote to memory cache
                                 self._cache[key] = df_disk
                                 self._cache_ts[key] = ts
@@ -220,13 +220,13 @@ class MarketDataManager:
             # 4️⃣  Store in caches
             if use_cache:
                 self._cache[key] = df
-                self._cache_ts[key] = datetime.utcnow()
+                self._cache_ts[key] = datetime.now()
                 self._write_to_disk(key, df)
                 # also write a tiny timestamp file for quick TTL checks
                 ts_path = self.cache_dir / f"{key}.ts"
                 try:
                     with ts_path.open("w") as fh:
-                        fh.write(datetime.utcnow().isoformat())
+                        fh.write(datetime.now().isoformat())
                 except Exception:  # pragma: no cover
                     logger.error("Failed to write timestamp for %s", key)
 
@@ -534,12 +534,12 @@ def fetch_multi_tf(symbol: str, lookback: int = 500) -> dict[str, pd.DataFrame]:
 
 def get_candles(symbol, timeframe_minutes, limit):
     
-    utc_from = datetime.utcnow() - timedelta(minutes=timeframe_minutes * limit)
+    utc_from = datetime.now() - timedelta(minutes=timeframe_minutes * limit)
     rates = mt5.copy_rates_range(
         symbol,
         timeframe=mt5.TIMEFRAME_M1 * timeframe_minutes,   # MT5 defines multiples of M1
         from_date=utc_from,
-        to_date=datetime.utcnow()
+        to_date=datetime.now()
     )
     df = pd.DataFrame(rates)
     df['timestamp'] = pd.to_datetime(df['time'], unit='s')
