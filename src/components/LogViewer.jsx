@@ -10,46 +10,83 @@ import {
   CircularProgress,
 } from "@mui/material";
 
+// =====================================================================
+// Log entry generator – produces stable unique IDs for each log line
+// =====================================================================
+let logEntryCounter = 0;
+
+class LogEntry {
+  constructor(content) {
+    this.id = `log-${logEntryCounter++}`;
+    this.content = content;
+  }
+}
+
+// =====================================================================
+// LogViewer Component – displays real-time logs from FastAPI backend
+// =====================================================================
 export default function LogViewer() {
-  const [container, setContainer] = useState("citadel-bot-1"); // default bucket
+  const [container, setContainer] = useState("citadel-bot-1");
   const [logLines, setLogLines] = useState([]);
   const [loading, setLoading] = useState(false);
   const eventSourceRef = useRef(null);
 
-  // -----------------------------------------------------------------
+  // ===================================================================
+  // Generate container options (6 containers: citadel-bot-1 to citadel-bot-6)
+  // ✅ FIXED: Using new Array() instead of [...Array()]
+  // ✅ FIXED: Using stable container names as keys instead of array indices
+  // ===================================================================
+  const containerOptions = new Array(6)
+    .fill(null)
+    .map((_, i) => ({
+      id: `container-${i + 1}`,  // ✅ Stable ID
+      label: `citadel-bot-${i + 1}`,
+      value: `citadel-bot-${i + 1}`,
+    }));
+
+  // ===================================================================
   // When container changes, open a new EventSource (Server‑Sent Events)
-  // -----------------------------------------------------------------
+  // ===================================================================
   useEffect(() => {
     // Clean up previous stream
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
-
     setLoading(true);
     setLogLines([]);
 
-    // FastAPI can stream logs as SSE – we’ll use that endpoint
+    // FastAPI can stream logs as SSE – we'll use that endpoint
     const es = new EventSource(`/api/logs/${container}`);
     eventSourceRef.current = es;
 
     es.onmessage = (e) => {
-      setLogLines((prev) => [...prev, e.data].slice(-500)); // keep last 500 lines
+      const logEntry = new LogEntry(e.data);
+      setLogLines((prev) => [...prev, logEntry].slice(-500)); // keep last 500 lines
     };
+
     es.onerror = (err) => {
       console.error("SSE error", err);
       es.close();
       setLoading(false);
     };
+
     es.onopen = () => setLoading(false);
 
-    return () => es.close();
+    return () => {
+      if (es) {
+        es.close();
+      }
+    };
   }, [container]);
 
-  // -----------------------------------------------------------------
+  // ===================================================================
   // Render UI
-  // -----------------------------------------------------------------
+  // ===================================================================
   return (
     <Box sx={{ mt: 2 }}>
+      {/* ============================================================= */}
+      {/* Container selector dropdown                                   */}
+      {/* ============================================================= */}
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel id="container-select-label">Select Bucket</InputLabel>
         <Select
@@ -58,16 +95,18 @@ export default function LogViewer() {
           label="Select Bucket"
           onChange={(e) => setContainer(e.target.value)}
         >
-          {/* List of bucket containers – you can generate this list from the
-              backend if you prefer; hard‑coded for demo */}
-          {[...Array(6)].map((_, i) => (
-            <MenuItem key={i} value={`citadel-bot-${i + 1}`}>
-              citadel‑bot‑{i + 1}
+          {/* ✅ FIXED: Using stable container ID as key instead of array index */}
+          {containerOptions.map((option) => (
+            <MenuItem key={option.id} value={option.value}>
+              {option.label}
             </MenuItem>
           ))}
         </Select>
       </FormControl>
 
+      {/* ============================================================= */}
+      {/* Log display area                                              */}
+      {/* ============================================================= */}
       <Paper
         elevation={3}
         sx={{
@@ -82,11 +121,14 @@ export default function LogViewer() {
         {loading ? (
           <CircularProgress size={24} />
         ) : (
-          logLines.map((ln, idx) => (
-            <Typography key={idx} variant="body2" component="pre">
-              {ln}
-            </Typography>
-          ))
+          <>
+            {/* ✅ FIXED: Using logEntry.id instead of array index */}
+            {logLines.map((logEntry) => (
+              <Typography key={logEntry.id} variant="body2" component="pre">
+                {logEntry.content}
+              </Typography>
+            ))}
+          </>
         )}
       </Paper>
     </Box>
