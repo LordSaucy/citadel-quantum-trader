@@ -591,7 +591,7 @@ if __name__ == "__main__":
 
     engine = BacktestEngine(initial_balance=10_000)
 
-    now = datetime.utcnow()
+    now = datetime.now()
     start = now - timedelta(days=90)
     end = now
 
