@@ -56,7 +56,7 @@ def _serialize_checkpoint(session):
 
     # 4️⃣ Timestamp for audit
     checkpoint = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now().isoformat(),
         "positions": pos_payload,
         "pending_orders": pend_payload,
         "risk_schedule": schedule,
