@@ -61,7 +61,7 @@ log = logging.getLogger(__name__)
 DEFAULT_COSTS = {
     "spread_pips": 0.2,          # typical ECN spread
     "commission_per_lot": 2.0,   # USD per standard lot
-    "swap_per_day": -0.05,       # negative = credit
+    "swap_per_day": -0.05,       
     "max_slippage_pips": 0.5,    # guard – reject if exceeded
 }
 
