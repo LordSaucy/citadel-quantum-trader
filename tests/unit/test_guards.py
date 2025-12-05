@@ -36,7 +36,7 @@ def test_calendar_lockout(monkeypatch):
     class DummyCal:
         @staticmethod
         def get_upcoming_events():
-            now = datetime.utcnow().replace(tzinfo=pytz.UTC)
+            now = datetime.now().replace(tzinfo=pytz.UTC)
             return [{
                 "title": "CPI Release",
                 "start_utc": now - timedelta(minutes=10),
@@ -67,7 +67,7 @@ def test_shock_detector():
     # 1️⃣ Spread explosion
     snap = {"bid": 1.0000, "ask": 1.0100,
             "spread_history": [0.001, 0.0012, 0.0011],
-            "timestamp": datetime.utcnow().replace(tzinfo=pytz.UTC),
+            "timestamp": datetime.now().replace(tzinfo=pytz.UTC),
             "bid_volume": 0.05, "ask_volume": 0.05,
             "depth": 0.03}
     assert detector.check(snap) is False
