@@ -12,7 +12,7 @@ from ultimate_confluence_system import ultimate_system
 # ----------------------------------------------------------------------
 def make_price_series(base=1.0800, length=200, noise=0.0001):
     """Return a list of (timestamp, price) tuples."""
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now()
     series = []
     for i in range(length):
         ts = now - datetime.timedelta(minutes=5 * i)
