@@ -65,7 +65,7 @@ def test_kill_switch_cooldown(rm_layer):
     # Force activation
     rm_layer.kill_switch_active = True
     rm_layer.kill_switch_reason = "Test reason"
-    rm_layer.unlock_time = datetime.datetime.utcnow() + datetime.timedelta(seconds=30)
+    rm_layer.unlock_time = datetime.datetime.now() + datetime.timedelta(seconds=30)
 
     # Call the routine that would normally clear it (if time passed)
     rm_layer._maybe_clear_kill_switch()
