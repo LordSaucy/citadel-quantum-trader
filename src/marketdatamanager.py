@@ -121,7 +121,7 @@ class MarketDataManager:
         """Return True if the in‑memory entry exists and is younger than TTL."""
         if key not in self._cache or key not in self._cache_ts:
             return False
-        age = (datetime.utcnow() - self._cache_ts[key]).total_seconds()
+        age = (datetime.now() - self._cache_ts[key]).total_seconds()
         return age < self.cache_ttl
 
     def _load_from_disk(self, key: str) -> Optional[pd.DataFrame]:
