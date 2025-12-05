@@ -4,7 +4,7 @@ import { AppBar, Toolbar, Typography, Button } from "@mui/material";
 export default function Header() {
   const handleLogout = () => {
     localStorage.removeItem("access_token");
-    window.location.reload();
+    globalThis.location.reload();
   };
 
   const token = localStorage.getItem("access_token");
