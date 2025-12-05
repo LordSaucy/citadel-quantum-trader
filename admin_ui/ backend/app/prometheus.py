@@ -13,7 +13,7 @@ def query_drawdown(start: str = None, end: str = None):
     if not start:
         start = (datetime.datetime.utcnow(datetime.timezone.utc) - datetime.timedelta(days=7)).isoformat()
     if not end:
-        end = datetime.datetime.utcnow().isoformat()
+        end = datetime.datetime.utcnow(datetime.timezone.utc).isoformat()
 
     result = pc.custom_query_range(
         query="drawdown_pct",
@@ -24,5 +24,5 @@ def query_drawdown(start: str = None, end: str = None):
     # Result format: [{'metric': {...}, 'values': [[ts, "0.123"], ...]}, ...]
     points = result[0]["values"] if result else []
     # Convert epoch seconds → ISO string for the front‑end
-    return [{"ts": datetime.datetime.utcfromtimestamp(v[0]).isoformat() + "Z",
+    return [{"ts": datetime.datetime.utcnow(datetime.timezone.utc)(v[0]).isoformat() + "Z",
              "value": float(v[1])} for v in points]
