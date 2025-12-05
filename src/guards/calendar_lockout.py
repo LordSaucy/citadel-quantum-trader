@@ -39,7 +39,7 @@ class CalendarLockout:
         self.cal = calendar_module
 
     def _now_utc(self):
-        return datetime.datetime.utcnow().replace(tzinfo=pytz.UTC)
+        return datetime.datetime.now().replace(tzinfo=pytz.UTC)
 
     def is_locked(self) -> bool:
         if not self.enabled:
