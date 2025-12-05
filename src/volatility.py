@@ -25,7 +25,7 @@ class VolatilityCalculator:
         """Average True Range over the stored window."""
         if len(self.window) < 2:
             return 0.0
-        highs, lows, closes = [], [], []
+        "_", "_", "_" = [], [], []
         # we only have close prices; approximate TR = |Δprice|
         prev_price = self.window[0][1]
         tr_vals = []
