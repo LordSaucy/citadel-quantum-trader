@@ -7,9 +7,12 @@ All tunable parameters are stored in a JSON file (mounted volume) and
 exposed as Prometheus gauges.  A tiny Flask API (port 5006) allows
 runtime adjustments from Grafana or an operator.
 
+✅ SECURITY: CSRF protection enabled on all POST/PUT/PATCH endpoints.
+   GET endpoints remain unprotected (safe by design).
+
 Author: Lawful Banker
 Created: 2024‑11‑26
-Version: 2.0 – Production‑Ready
+Version: 2.1 – Production‑Ready with CSRF Protection
 """
 
 # =====================================================================
@@ -18,6 +21,7 @@ Version: 2.0 – Production‑Ready
 import json
 import logging
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Thread
@@ -30,6 +34,7 @@ from typing import Dict, Optional, Tuple
 import MetaTrader5 as mt5
 import numpy as np
 from flask import Flask, abort, jsonify, request
+from flask_wtf.csrf import CSRFProtect
 from prometheus_client import Gauge
 
 # =====================================================================
@@ -52,6 +57,8 @@ class VolEntryController:
           volatility_param{param="weight_atr"} 0.20
     * A small Flask API (port 5006) lets Grafana or an operator change
       values on‑the‑fly.
+    
+    ✅ SECURITY: CSRF protection enabled on state-changing endpoints
     """
 
     # =====================================================================
@@ -158,6 +165,53 @@ class VolEntryController:
         return self.values[key]
 
     # =====================================================================
+    # ✅ SECURITY FIX: Secure SECRET_KEY management
+    # =====================================================================
+    def _get_or_create_secret_key(self) -> str:
+        """
+        ✅ SECURITY FIX: Retrieve SECRET_KEY from environment or generate/persist one.
+        
+        This prevents hardcoded secrets and supports external secrets management.
+        
+        Priority:
+        1. FLASK_VOLENTRY_SECRET_KEY environment variable (for production)
+        2. Persisted key file (generated once, reused across restarts)
+        3. Generate new cryptographically-secure key (fallback)
+        """
+        # 1. Check environment variable first
+        env_key = os.getenv('FLASK_VOLENTRY_SECRET_KEY')
+        if env_key:
+            logger.info("📌 VolEntry SECRET_KEY loaded from FLASK_VOLENTRY_SECRET_KEY environment variable")
+            return env_key
+        
+        # 2. Check persisted key file
+        secret_file = Path("/app/config/volentry_secret_key")
+        if secret_file.exists():
+            try:
+                with open(secret_file, 'r') as f:
+                    persisted_key = f.read().strip()
+                    if persisted_key and len(persisted_key) >= 32:
+                        logger.info("📌 VolEntry SECRET_KEY loaded from persisted secure key file")
+                        return persisted_key
+            except Exception as exc:
+                logger.warning(f"⚠️ Could not read persisted VolEntry SECRET_KEY: {exc}")
+        
+        # 3. Generate new cryptographically-secure key
+        new_key = secrets.token_urlsafe(32)  # 256-bit key in URL-safe base64
+        
+        # Persist for consistency across restarts
+        try:
+            secret_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(secret_file, 'w') as f:
+                f.write(new_key)
+            secret_file.chmod(0o600)  # Owner-only permissions
+            logger.info(f"✅ Generated and persisted new VolEntry SECRET_KEY")
+        except Exception as exc:
+            logger.warning(f"⚠️ Could not persist VolEntry SECRET_KEY: {exc}")
+        
+        return new_key
+
+    # =====================================================================
     # File‑watcher – reloads the JSON if someone edited it manually
     # ✅ FIXED: Reduced cognitive complexity from 16 to 14
     # =====================================================================
@@ -192,34 +246,74 @@ class VolEntryController:
         return mtime != last_mtime
 
     # =====================================================================
-    # Flask API – runs on 0.0.0.0:5006 (exposed via Docker‑compose)
+    # ✅ SECURITY FIX: Flask API with CSRF protection
     # =====================================================================
     def _start_flask_api(self) -> None:
+        """
+        Spin up a tiny Flask API on 0.0.0.0:5006 with CSRF protection.
+        
+        GET endpoints (read-only) are unprotected – safe by design.
+        POST/PUT/PATCH endpoints (state-changing) require CSRF tokens.
+        
+        ✅ SECURITY: Clients must provide X-CSRFToken header for mutations.
+        """
         app = Flask(__name__)
+
+        # ✅ SECURITY FIX: Use secure SECRET_KEY (environment > persisted > generated)
+        app.config['SECRET_KEY'] = self._get_or_create_secret_key()
+        
+        # ✅ SECURITY FIX: Enable CSRF protection on state-changing endpoints
+        csrf = CSRFProtect(app)
 
         @app.route("/config", methods=["GET"])
         def get_all():
-            """Return the whole config as JSON."""
+            """
+            GET endpoint – no CSRF protection needed (read-only).
+            Returns the whole config as JSON.
+            """
             return jsonify(self.values)
 
         @app.route("/config/<key>", methods=["GET"])
         def get_one(key: str):
+            """
+            GET endpoint – no CSRF protection needed (read-only).
+            Returns a single parameter value.
+            """
             if key not in self.values:
                 abort(404, description=f"Parameter {key} not found")
             return jsonify({key: self.values[key]})
 
         @app.route("/config/<key>", methods=["POST", "PUT", "PATCH"])
+        @csrf.protect  # ✅ SECURITY: CSRF token required for state-changing operations
         def set_one(key: str):
+            """
+            POST/PUT/PATCH endpoint – CSRF protected.
+            
+            Clients must provide X-CSRFToken header or include csrf_token in form data.
+            
+            Example request:
+                POST /config/weight_atr
+                X-CSRFToken: <token-from-GET-request>
+                Content-Type: application/json
+                {"value": 0.25}
+            """
             if key not in self.values:
                 abort(404, description=f"Parameter {key} not found")
             payload = request.get_json(force=True)
             if not payload or "value" not in payload:
                 abort(400, description="JSON body must contain 'value'")
-            self.set(key, payload["value"])
-            return jsonify({key: self.values[key]})
+            try:
+                self.set(key, payload["value"])
+                return jsonify({key: self.values[key]})
+            except (KeyError, ValueError) as exc:
+                abort(400, description=str(exc))
 
         @app.route("/healthz", methods=["GET"])
         def health():
+            """
+            GET endpoint – no CSRF protection needed (health check).
+            Simple liveness probe for orchestrators.
+            """
             return "OK", 200
 
         def _run():
@@ -227,6 +321,7 @@ class VolEntryController:
             app.run(host="0.0.0.0", port=5006, debug=False, use_reloader=False)
 
         Thread(target=_run, daemon=True, name="vol-entry-flask-api").start()
+        logger.info("📡 VolEntry Flask API listening on 0.0.0.0:5006 (CSRF protected)")
 
     # =====================================================================
     # Graceful shutdown (called from the main process on SIGTERM)
