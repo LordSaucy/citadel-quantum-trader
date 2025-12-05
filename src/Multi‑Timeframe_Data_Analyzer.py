@@ -22,6 +22,7 @@ Created: 2024‑11‑26
 import json
 import logging
 import os
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
@@ -162,6 +163,66 @@ class MTFDataAnalyzer:
                 json.dump(self.config, f, indent=2)
         except Exception as exc:   # pragma: no cover
             logger.error(f"Could not persist MTF config: {exc}")
+
+    # =====================================================================
+    # ✅ SECURITY FIX: Secure SECRET_KEY management
+    # =====================================================================
+    def _get_or_create_secret_key(self) -> str:
+        """
+        ✅ SECURITY FIX: Retrieve SECRET_KEY from environment or generate/persist one.
+        
+        This replaces the hardcoded fallback 'mtf-analyzer-internal-key' vulnerability
+        with a multi-tier secure approach:
+        
+        Priority:
+        1. FLASK_SECRET_KEY environment variable (for production with secrets management)
+        2. Persisted key file (generated once, reused across restarts)
+        3. Generate a new cryptographically-secure key if neither exists
+        
+        This eliminates the hardcoded fallback vulnerability while maintaining
+        session stability across container restarts.
+        
+        Security benefits:
+        - No secrets in code repository
+        - Supports external secrets management (K8s, HashiCorp Vault, etc.)
+        - Cryptographically secure key generation (uses os.urandom)
+        - File permissions restricted to owner only (0600)
+        - Prevents session hijacking via predictable keys
+        """
+        # 1. Check environment variable first (highest priority)
+        env_key = os.getenv('FLASK_SECRET_KEY')
+        if env_key:
+            logger.info("📌 SECRET_KEY loaded from FLASK_SECRET_KEY environment variable")
+            return env_key
+        
+        # 2. Check persisted key file
+        secret_file = Path("/app/config/flask_secret_key")
+        if secret_file.exists():
+            try:
+                with open(secret_file, 'r') as f:
+                    persisted_key = f.read().strip()
+                    if persisted_key and len(persisted_key) >= 32:
+                        logger.info("📌 SECRET_KEY loaded from persisted secure key file")
+                        return persisted_key
+            except Exception as exc:
+                logger.warning(f"⚠️ Could not read persisted SECRET_KEY: {exc}")
+        
+        # 3. Generate new cryptographically-secure key
+        # secrets.token_urlsafe(32) generates 256-bit key in URL-safe base64
+        new_key = secrets.token_urlsafe(32)
+        
+        # Persist it for consistency across container restarts
+        try:
+            secret_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(secret_file, 'w') as f:
+                f.write(new_key)
+            # Restrict permissions to owner only (0600)
+            secret_file.chmod(0o600)
+            logger.info(f"✅ Generated and persisted new SECRET_KEY to {secret_file}")
+        except Exception as exc:
+            logger.warning(f"⚠️ Could not persist SECRET_KEY: {exc}. Using ephemeral key.")
+        
+        return new_key
 
     # =====================================================================
     # ✅ FIXED: Reduced cognitive complexity from 16 to 12
@@ -618,9 +679,9 @@ class MTFDataAnalyzer:
         """
         app = Flask(__name__)
 
-        # Enable CSRF protection with secret key
-        # For internal APIs on VPC, a static key is acceptable
-        app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'mtf-analyzer-internal-key')
+        # ✅ SECURITY FIX: Use secure SECRET_KEY (environment > persisted > generated)
+        # Replaces hardcoded fallback 'mtf-analyzer-internal-key' vulnerability
+        app.config['SECRET_KEY'] = self._get_or_create_secret_key()
         csrf = CSRFProtect(app)
 
         @app.route("/summary", methods=["GET"])
