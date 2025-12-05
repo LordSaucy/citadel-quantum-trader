@@ -32,8 +32,8 @@ def main():
         analysis = validator.run_validation(
             symbol=symbol,
             timeframe=5,
-            start_date=datetime.utcnow() - timedelta(days=180),
-            end_date=datetime.utcnow(),
+            start_date=datetime.now() - timedelta(days=180),
+            end_date=datetime.now(),
             strategy_function=generate_signal,
             data_feed=feed,
             min_win_rate=0.99   # 99% win‑rate threshold
