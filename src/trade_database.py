@@ -541,7 +541,7 @@ class TradeDatabase:
                 ) VALUES (?,?,?,?,?);
                 """,
                 (
-                    datetime.utcnow().isoformat(),
+                    datetime.now().isoformat(),
                     event_type,
                     severity,
                     message,
@@ -591,7 +591,7 @@ if __name__ == "__main__":
             ticket=1000 + i,
             symbol=random.choice(["EURUSD", "GBPUSD", "USDJPY"]),
             direction=random.choice(["BUY", "SELL"]),
-            entry_time=datetime.utcnow().isoformat(),
+            entry_time=datetime.now().isoformat(),
             entry_price=round(random.uniform(1.0, 1.5), 5),
             stop_loss=round(random.uniform(0.9, 1.0), 5),
             take_profit=round(random.uniform(1.5, 2.0), 5),
