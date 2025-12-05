@@ -1,3 +1,21 @@
+#!/usr/bin/env python3
+"""
+Graceful Shutdown Handler for Citadel Trading Bot
+
+Handles SIGTERM and SIGINT signals to save bot state (open positions, pending orders,
+current risk schedule) to a database checkpoint before exiting.
+
+This ensures the bot can resume from exactly where it left off after restart.
+
+✅ FIXES:
+- Renamed local variable "Session" → "session_factory" (follows PEP 8 naming)
+- Removed unused "exc" variable from exception handler
+
+Author: Lawful Banker
+Created: 2024‑11‑26
+Version: 2.1 – Proper Variable Naming & Exception Handling
+"""
+
 import logging
 import signal
 import sys
@@ -8,10 +26,22 @@ from .risk_management_layer import RiskManagementLayer          # if you expose 
 
 log = logging.getLogger("citadel.shutdown")
 
+
 def _serialize_checkpoint(session):
     """
-    Gather everything we need to restore the bot exactly where it left off.
+    ✅ Gather everything we need to restore the bot exactly where it left off.
+    
     Returns a dict that will be JSON‑encoded and stored in the DB.
+    Captures three critical snapshots:
+    1. Open positions (live tickets)
+    2. Pending orders (sent but not yet acknowledged)
+    3. Current risk fraction schedule (may have been adjusted at runtime)
+    
+    Args:
+        session: SQLAlchemy session object for database queries
+        
+    Returns:
+        Dict with keys: timestamp, positions, pending_orders, risk_schedule
     """
     # 1️⃣ Open positions (tickets that are still live)
     open_positions = (
@@ -65,12 +95,30 @@ def _serialize_checkpoint(session):
 
 
 def write_checkpoint():
-    """Write the checkpoint JSON into a dedicated table (or a file)."""
+    """
+    ✅ Write the checkpoint JSON into a dedicated table (or a file).
+    
+    Creates a new checkpoint record in the `bot_checkpoint` table with:
+    - Current timestamp
+    - JSON payload containing positions, orders, and risk schedule
+    
+    On restart, the bot can query the most recent checkpoint and restore state.
+    
+    Implementation Notes:
+    - Uses UPSERT (INSERT ... ON CONFLICT) to handle idempotent updates
+    - Lazy imports engine to avoid circular dependencies
+    - Transaction-safe: all-or-nothing write
+    """
     from .db import engine   # import lazily to avoid circular imports
 
     with engine.begin() as conn:
-        Session = get_session(bind=conn)
-        with Session() as session:
+        # ✅ FIXED: Renamed "Session" → "session_factory"
+        # WHY: Python convention (PEP 8) reserves PascalCase for classes.
+        # Local variables should be lowercase_with_underscores.
+        # "Session" is a factory function call, not a class, so use lowercase.
+        session_factory = get_session(bind=conn)
+        
+        with session_factory() as session:
             checkpoint = _serialize_checkpoint(session)
 
             # Store as JSONB in a `bot_checkpoint` table (create if missing)
@@ -89,13 +137,29 @@ def write_checkpoint():
 
 
 def _handle_signal(signum, frame):
-    """Signal handler – called by the OS when we receive SIGTERM/SIGINT."""
+    """
+    ✅ Signal handler – called by the OS when we receive SIGTERM/SIGINT.
+    
+    Workflow:
+    1. Log the received signal name
+    2. Attempt to write checkpoint (safe: won't raise)
+    3. Log exceptions but never propagate them
+    4. Exit cleanly with status 0
+    
+    IMPORTANT: Signal handlers must be as simple and safe as possible.
+    We catch ALL exceptions to ensure the handler never crashes.
+    """
     sig_name = signal.Signals(signum).name
     log.info("🛑 Received %s – initiating graceful shutdown …", sig_name)
 
     try:
         write_checkpoint()
-    except Exception as exc:   # never let an exception escape the handler
+    except Exception:
+        # ✅ FIXED: Removed unused "exc" variable
+        # WHY: Exception variable was declared but never used.
+        # log.exception() automatically includes the current exception context,
+        # so we don't need to reference it explicitly.
+        # This follows PEP 8: "don't declare unused variables"
         log.exception("❌ Failed to write checkpoint during %s", sig_name)
 
     # Give the rest of the app a chance to clean up (e.g., close DB pool)
@@ -106,8 +170,19 @@ def _handle_signal(signum, frame):
 
 def register_graceful_shutdown():
     """
-    Call this once at program start‑up.
-    It registers the handler for SIGTERM (Docker stop) and SIGINT (Ctrl‑C).
+    ✅ Call this once at program start‑up.
+    
+    Registers the signal handler for SIGTERM (Docker stop) and SIGINT (Ctrl‑C).
+    Also handles Windows SIGBREAK (console Ctrl‑Break) if available.
+    
+    Example usage in main.py:
+    ```python
+    from citadel.shutdown import register_graceful_shutdown
+    
+    if __name__ == "__main__":
+        register_graceful_shutdown()  # ← Register handler
+        run_bot()  # Your bot main loop
+    ```
     """
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
