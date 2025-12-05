@@ -44,7 +44,7 @@ def log_run(best_vals, fitness):
     """)
     cur.execute(
         "INSERT OR REPLACE INTO runs (ts, fitness, params) VALUES (?,?,?)",
-        (datetime.datetime.utcnow().isoformat(),
+        (datetime.datetime.now().isoformat(),
          fitness,
          json.dumps(best_vals))
     )
