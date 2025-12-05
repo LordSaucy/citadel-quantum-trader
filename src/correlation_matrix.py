@@ -98,7 +98,7 @@ def compute_and_store(engine: "sqlalchemy.Engine"):
                 SET avg_corr = EXCLUDED.avg_corr,
                     matrix_json = EXCLUDED.matrix_json;
             """),
-            {"ts": datetime.utcnow(),
+            {"ts": datetime.now(),
              "avg": avg,
              "matrix": matrix_json}
         )
