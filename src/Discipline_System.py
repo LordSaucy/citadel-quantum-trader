@@ -120,7 +120,7 @@ class TradingContract:
                 return False
 
             self.contract.signed = True
-            self.contract.signed_date = datetime.utcnow().isoformat()
+            self.contract.signed_date = datetime.now().isoformat()
             self.contract.trader_name = trader_name
             self._save(self.contract)
 
@@ -274,7 +274,7 @@ class TradingJournal:
         update the result).
         """
         entry = JournalEntry(
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now().isoformat(),
             trade_ticket=ticket,
             symbol=symbol,
             direction=direction.upper(),
@@ -414,7 +414,7 @@ class AccountabilitySystem:
                 pass
 
             violation = {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now().isoformat(),
                 "type": violation_type,
                 "description": description,
                 "penalty_due": penalty,
