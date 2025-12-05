@@ -198,7 +198,7 @@ class SessionTimeFilter:
         The method is pure – it does **not** modify any internal state
         (apart from reading the two toggle flags).
         """
-        now_utc = datetime.utcnow().time()
+        now_utc = datetime.now().time()
         current_session = self._identify_session(now_utc)
         session_cfg = self.SESSION_TIMES[current_session]
 
@@ -272,7 +272,7 @@ class SessionTimeFilter:
           session starts).
         * Weekdays → considered open 24 h (most FX brokers operate 24 h).
         """
-        now = datetime.utcnow()
+        now = datetime.now()
         weekday = now.weekday()          # 0 = Mon … 6 = Sun
 
         # Saturday or Sunday → closed, except Sunday evening (NY start)
@@ -337,7 +337,7 @@ class SessionTimeFilter:
         of the week (UTC).  Values are empirically chosen for typical FX
         market behaviour.
         """
-        dow = datetime.utcnow().weekday()   # 0 = Mon … 6 = Sun
+        dow = datetime.now().weekday()   # 0 = Mon … 6 = Sun
         adjustments = {
             0: 1.00,   # Monday – normal
             1: 1.10,   # Tuesday – high activity
