@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-import json, base64, hashlib, sys, boto3
+import json, base64, hashlib, sys,
 from botocore.exceptions import ClientError
+from src.aws.s3_client import get_s3_client
 
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -8,11 +9,11 @@ def sha256_hex(data: bytes) -> str:
 def verify(s3_bucket: str, manifest_key: str) -> bool:
     s3 = boto3.client('s3')
     # 1️⃣ Download manifest
-    manifest_obj = s3.get_object(Bucket=s3_bucket, Key=manifest_key)
+    manifest_obj = s3 = get_s3_client()
     manifest = json.loads(manifest_obj['Body'].read())
 
     # 2️⃣ Download snapshot
-    snapshot_obj = s3.get_object(Bucket=s3_bucket, Key=manifest['snapshot_key'])
+    snapshot_obj = s3 = get_s3_client()
     snapshot_bytes = snapshot_obj['Body'].read()
 
     # 3️⃣ Re‑compute hash
