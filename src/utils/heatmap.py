@@ -29,7 +29,7 @@ def plot_depth_heatmap(symbol: str, depth_data: list) -> str:
     # Save under a predictable location (e.g. /tmp/heatmaps)
     out_dir = "/tmp/heatmaps"
     os.makedirs(out_dir, exist_ok=True)
-    fname = f"{symbol}_{datetime.utcnow():%Y%m%d_%H%M%S}.png"
+    fname = f"{symbol}_{datetime.now():%Y%m%d_%H%M%S}.png"
     out_path = os.path.join(out_dir, fname)
     plt.savefig(out_path, dpi=150)
     plt.close(fig)
