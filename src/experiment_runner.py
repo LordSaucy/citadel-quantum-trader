@@ -1,19 +1,47 @@
 #!/usr/bin/env python3
-import subprocess, time, os, pathlib, pandas as pd
+"""
+Experiment Runner for CQT – A/B testing framework.
+
+Compares two trading strategies:
+* Control: Original implementation (public schema)
+* Variant: Experimental changes (exp schema)
+
+Runs both in parallel under identical market conditions, collects metrics,
+and appends results to a CSV for statistical analysis.
+
+Author: Lawful Banker
+"""
+
+import subprocess
+import time
+import os
+import pathlib
+import pandas as pd
+import numpy as np
 from datetime import datetime
 
 DOCKER_COMPOSE = 'docker compose'   # or 'docker-compose' on older versions
 RESULTS_CSV = pathlib.Path('experiments/results.csv')
 RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
 
+
 def start_stack():
+    """Start the Docker Compose stack for the experiment."""
     subprocess.run(f"{DOCKER_COMPOSE} up -d", shell=True, check=True)
 
+
 def stop_stack():
+    """Stop the Docker Compose stack and clean up volumes."""
     subprocess.run(f"{DOCKER_COMPOSE} down -v", shell=True, check=True)
 
+
 def wait_for_trades(target_trades=5000, poll_interval=5):
-    """Poll the two schemas until each has at least target_trades rows."""
+    """
+    Poll the two schemas until each has at least target_trades rows.
+    
+    This ensures both control and variant instances have generated enough
+    trading data before we proceed to analysis.
+    """
     import psycopg2
     conn = psycopg2.connect(
         host='localhost',
@@ -35,7 +63,12 @@ def wait_for_trades(target_trades=5000, poll_interval=5):
     cur.close()
     conn.close()
 
+
 def analyse_and_append():
+    """
+    Fetch trade data from both schemas, compute key metrics,
+    and append results to the CSV file.
+    """
     import psycopg2
     conn = psycopg2.connect(
         host='localhost',
@@ -46,23 +79,31 @@ def analyse_and_append():
     )
     # Pull raw data for each schema
     df_ctrl = pd.read_sql("SELECT * FROM public.trades", conn)
-    df_exp  = pd.read_sql("SELECT * FROM exp.trades", conn)
+    df_exp = pd.read_sql("SELECT * FROM exp.trades", conn)
 
     # Helper to compute the metrics you care about
     def metrics(df):
+        """Compute key performance metrics from a trade DataFrame."""
         pnl = df['pnl'].sum()
-        equity = df['equity_before'].iloc[-1] + pnl
+        # ✅ FIXED: Removed unused variable `equity`
+        # Original: equity = df['equity_before'].iloc[-1] + pnl
+        # (equity was computed but never used)
+        
         win_rate = (df['pnl'] > 0).mean()
         sharpe = (df['pnl'].mean() / df['pnl'].std()) * (252**0.5)   # daily → annualized
         max_dd = (df['equity_before'] - df['equity_before'].cummax()).min()
         expectancy = pnl / len(df)   # avg $ per trade
-        return dict(expectancy=expectancy,
-                    win_rate=win_rate,
-                    sharpe=sharpe,
-                    max_dd=max_dd)
+        
+        # ✅ FIXED: Use dict literal instead of dict() constructor
+        return {
+            "expectancy": expectancy,
+            "win_rate": win_rate,
+            "sharpe": sharpe,
+            "max_dd": max_dd,
+        }
 
     m_ctrl = metrics(df_ctrl)
-    m_exp  = metrics(df_exp)
+    m_exp = metrics(df_exp)
 
     # Append a row to the CSV
     row = {
@@ -89,7 +130,17 @@ def analyse_and_append():
 
     conn.close()
 
+
 def run_one_experiment():
+    """
+    Run a single A/B test experiment.
+    
+    Orchestrates:
+    1. Starting the Docker stack (control + variant instances)
+    2. Waiting for both instances to generate trade data
+    3. Analyzing and comparing results
+    4. Cleaning up
+    """
     try:
         start_stack()
         # Give the feed a moment to warm‑up
@@ -99,25 +150,33 @@ def run_one_experiment():
     finally:
         stop_stack()
 
-if __name__ == '__main__':
-    run_one_experiment()
-
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 def make_plot(row: dict):
-    """Create a side‑by‑side bar chart for the most important KPIs."""
-    fig, ax = plt.subplots(figsize=(10, 4))
+    """
+    Create a side‑by‑side bar chart for the most important KPIs.
+    
+    Compares control vs. variant performance on:
+    - Expectancy (expected $ per trade)
+    - Sharpe ratio (risk-adjusted returns)
+    - Maximum drawdown (peak-to-trough)
+    - Win rate (% profitable trades)
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    
+    # ✅ FIXED: Use _ for unused variable 'fig'
+    _, ax = plt.subplots(figsize=(10, 4))
+    
     metrics = ['expectancy', 'sharpe', 'max_dd', 'win_rate']
     ctrl_vals = [row[f'control_{m}'] for m in metrics]
-    exp_vals  = [row[f'variant_{m}']  for m in metrics]
+    exp_vals = [row[f'variant_{m}'] for m in metrics]
 
     x = np.arange(len(metrics))
     width = 0.35
     ax.bar(x - width/2, ctrl_vals, width, label='Control')
-    ax.bar(x + width/2, exp_vals,  width, label='Variant')
+    ax.bar(x + width/2, exp_vals, width, label='Variant')
     ax.set_xticks(x)
-    ax.set_xticklabels(['Exp.', 'Sharpe', 'Max‑DD', 'Win‑Rate'])
+    ax.set_xticklabels(['Expectancy', 'Sharpe', 'Max‑DD', 'Win‑Rate'])
     ax.set_ylabel('Metric value')
     ax.set_title(f"{row['experiment']} – {row['timestamp'][:10]}")
     ax.legend()
@@ -130,3 +189,6 @@ def make_plot(row: dict):
     plt.close()
     print(f"Plot saved to {fname}")
 
+
+if __name__ == '__main__':
+    run_one_experiment()
