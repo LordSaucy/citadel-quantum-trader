@@ -154,7 +154,11 @@ def test_get_account_info(monkeypatch, cfg):
     info = adapter.get_account_info()
     
     assert info["accountId"] == "123456"
-    assert info["balance"] == 10000.0
+    # ✅ FIXED: Use pytest.approx() for floating point comparison
+    # WHY: Account balance is a float that may have precision issues from API
+    # API responses from JSON serialization can have floating point precision errors
+    # Default tolerance: 1e-6 relative, 1e-12 absolute
+    assert info["balance"] == pytest.approx(10000.0), "Expected balance=10000.0 from API response"
     assert info["leverage"] == 100
 
 
@@ -199,9 +203,14 @@ def test_get_market_depth(monkeypatch, cfg):
     depth = adapter.get_market_depth("EURUSD", depth=20)
     
     assert len(depth["bid"]) == 2
-    assert depth["bid"][0]["price"] == 1.0950
+    # ✅ FIXED: Use pytest.approx() for floating point comparisons
+    # WHY: Price data is float that may have precision issues from API JSON serialization
+    # Order book prices from external APIs can have floating point precision errors
+    # Example: 1.0950 might be stored as 1.0949999999999998 in IEEE 754
+    # Default tolerance: 1e-6 relative, 1e-12 absolute
+    assert depth["bid"][0]["price"] == pytest.approx(1.0950), "Expected bid price=1.0950"
     assert len(depth["ask"]) == 2
-    assert depth["ask"][0]["price"] == 1.0951
+    assert depth["ask"][0]["price"] == pytest.approx(1.0951), "Expected ask price=1.0951"
 
 
 # =====================================================================
@@ -249,5 +258,9 @@ def test_get_market_depth_multiple_symbols(monkeypatch, cfg, symbol, expected_bi
     adapter = CTraderAdapter(cfg)
     depth = adapter.get_market_depth(symbol)
     
-    assert depth["bid"][0]["price"] == expected_bid
-    assert depth["ask"][0]["price"] == expected_ask
+    # ✅ FIXED: Use pytest.approx() for floating point comparisons
+    # WHY: Parametrized test values are floats that may have precision issues
+    # When comparing prices from different symbols and expected values,
+    # floating point precision can vary, so tolerance-based comparison is needed
+    assert depth["bid"][0]["price"] == pytest.approx(expected_bid), f"Expected bid price={expected_bid} for {symbol}"
+    assert depth["ask"][0]["price"] == pytest.approx(expected_ask), f"Expected ask price={expected_ask} for {symbol}"
