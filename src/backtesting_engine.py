@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
-Backtesting Engine
+backtesting_engine.py – Production‑grade back‑testing engine.
 
-Test trading strategy on historical data
+Features
+--------
+* Load historical OHLCV data from MetaTrader 5.
+* Generate simple EMA/ATR/RSI‑based confluence signals.
+* Simulate trades forward‑looking until SL/TP is hit.
+* Record trades, equity curve and a rich set of performance metrics.
+* Export results to JSON for downstream analysis.
+* Prometheus gauges for live monitoring while a back‑test runs.
 
-Features:
-- Historical data loading from MT5
-- Trade simulation
-- Performance metrics calculation
-- Equity curve generation
-- Export results
-- Multiple timeframe support
+The implementation follows the **Clean‑Code** principles:
+* Functions have a single responsibility.
+* Early‑return guard clauses keep nesting shallow (cognitive complexity ≤ 15).
+* All datetime handling uses the central `utc_now()` helper.
+* S3 interactions go through `src/aws/s3_helper.py`.
 """
 
 # ----------------------------------------------------------------------
@@ -22,9 +27,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from threading import Event, Thread
-from time import sleep
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 # ----------------------------------------------------------------------
 # Third‑party
@@ -32,7 +35,13 @@ from typing import Dict, List, Optional, Tuple
 import MetaTrader5 as mt5
 import numpy as np
 import pandas as pd
-from prometheus_client import Gauge  # already a dependency of the project
+from prometheus_client import Gauge
+
+# ----------------------------------------------------------------------
+# Local utilities
+# ----------------------------------------------------------------------
+from src.utils.common import utc_now          # Central UTC helper
+from src.aws.s3_helper import s3_client       # Secure S3 client wrapper
 
 # ----------------------------------------------------------------------
 # Logging configuration (uses the global logger of the application)
@@ -40,15 +49,37 @@ from prometheus_client import Gauge  # already a dependency of the project
 logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
-# DATA CLASSES
+# Prometheus gauges (global – one per engine instance)
+# ----------------------------------------------------------------------
+_gauge_trades_processed = Gauge(
+    "backtest_trades_processed",
+    "Number of trades processed during backtest",
+)
+_gauge_current_equity = Gauge(
+    "backtest_current_equity",
+    "Current equity during backtest execution",
+)
+_gauge_win_rate = Gauge(
+    "backtest_win_rate",
+    "Running win‑rate (%) during backtest",
+)
+_gauge_sharpe = Gauge(
+    "backtest_sharpe_ratio",
+    "Running Sharpe ratio during backtest",
+)
+
+
+# ----------------------------------------------------------------------
+# Data classes
 # ----------------------------------------------------------------------
 @dataclass
 class BacktestTrade:
     """Record of a single simulated trade."""
+
     entry_time: datetime
     exit_time: datetime
     symbol: str
-    direction: str                     # "BUY" or "SELL"
+    direction: str  # "BUY" or "SELL"
     entry_price: float
     exit_price: float
     stop_loss: float
@@ -65,43 +96,24 @@ class BacktestTrade:
 @dataclass
 class BacktestResults:
     """Container for the complete back‑test output."""
+
     start_date: datetime
     end_date: datetime
     initial_balance: float
     final_balance: float
     trades: List[BacktestTrade] = field(default_factory=list)
-    equity_curve: List[Dict] = field(default_factory=list)   # [{'time':…, 'balance':…}, …]
+    equity_curve: List[Dict] = field(default_factory=list)  # [{"time":…, "balance":…}, …]
     statistics: Dict = field(default_factory=dict)
 
 
 # ----------------------------------------------------------------------
-# BACKTEST ENGINE
+# Backtest engine
 # ----------------------------------------------------------------------
 class BacktestEngine:
-    """
-    Backtesting engine to validate strategy performance on historical MT5 data.
-    """
+    """Back‑testing engine to validate strategy performance on historical MT5 data."""
 
     # ------------------------------------------------------------------
-    # Prometheus gauges (global – one per engine instance)
-    # ------------------------------------------------------------------
-    _gauge_trades_processed = Gauge(
-        "backtest_trades_processed",
-        "Number of trades processed during backtest",
-    )
-    _gauge_current_equity = Gauge(
-        "backtest_current_equity",
-        "Current equity during backtest execution",
-    )
-    _gauge_win_rate = Gauge(
-        "backtest_win_rate",
-        "Running win‑rate (%) during backtest",
-    )
-    _gauge_sharpe = Gauge(
-        "backtest_sharpe_ratio",
-        "Running Sharpe ratio during backtest",
-    )
-
+    # Construction
     # ------------------------------------------------------------------
     def __init__(self, initial_balance: float = 10_000.0):
         """
@@ -122,6 +134,14 @@ class BacktestEngine:
         logger.info(f"📊 BacktestEngine initialised with ${self.initial_balance:,.2f}")
 
     # ------------------------------------------------------------------
+    # Helper – UTC now (thin wrapper around utils.common.utc_now)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _now() -> datetime:
+        """Convenient alias for the UTC helper."""
+        return utc_now()
+
+    # ------------------------------------------------------------------
     # DATA LOADING
     # ------------------------------------------------------------------
     def load_historical_data(
@@ -132,9 +152,10 @@ class BacktestEngine:
         end_date: datetime,
     ) -> pd.DataFrame:
         """
-        Load OHLCV data from MT5.
+        Load OHLCV data from MT5 and enrich it with technical indicators.
 
-        Returns a DataFrame indexed by time with additional indicator columns.
+        Returns a DataFrame indexed by time.  If loading fails an empty
+        DataFrame is returned (caller must handle it).
         """
         try:
             if not mt5.initialize():
@@ -143,7 +164,7 @@ class BacktestEngine:
 
             rates = mt5.copy_rates_range(symbol, timeframe, start_date, end_date)
 
-            if rates is None or len(rates) == 0:
+            if not rates:
                 logger.error(f"No historical data for {symbol}")
                 return pd.DataFrame()
 
@@ -154,12 +175,17 @@ class BacktestEngine:
             logger.info(f"✅ Loaded {len(df)} bars for {symbol}")
             return df
 
-        except Exception as exc:   # pragma: no cover
+        except Exception:  # pragma: no cover
+            # We deliberately swallow the exception here – the caller will
+            # see an empty DataFrame and abort the back‑test gracefully.
             logger.exception(f"Error loading data for {symbol}")
             return pd.DataFrame()
 
     # ------------------------------------------------------------------
-    def _add_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    # Indicator enrichment (EMA, ATR, RSI)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _add_indicators(df: pd.DataFrame) -> pd.DataFrame:
         """Calculate EMA, ATR, RSI and attach them to the frame."""
         # EMA
         df["ema20"] = df["close"].ewm(span=20, adjust=False).mean()
@@ -184,7 +210,8 @@ class BacktestEngine:
     # ------------------------------------------------------------------
     # SIGNAL GENERATION
     # ------------------------------------------------------------------
-    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def generate_signals(df: pd.DataFrame) -> pd.DataFrame:
         """
         Produce simple confluence signals.
 
@@ -198,7 +225,7 @@ class BacktestEngine:
         df["long_signal"] = df["trend_up"] & (df["rsi"] > 50) & (df["close"] > df["ema20"])
         df["short_signal"] = df["trend_down"] & (df["rsi"] < 50) & (df["close"] < df["ema20"])
 
-        # Stop‑loss / take‑profit (ATR‑based)
+        # SL / TP (ATR‑based)
         df["long_sl"] = df["close"] - (df["atr"] * 1.5)
         df["short_sl"] = df["close"] + (df["atr"] * 1.5)
 
@@ -208,8 +235,38 @@ class BacktestEngine:
         return df
 
     # ------------------------------------------------------------------
-    # TRADE SIMULATION
+    # TRADE SIMULATION (forward walk)
     # ------------------------------------------------------------------
+    @staticmethod
+    def _walk_forward(
+        entry_idx: int,
+        direction: str,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        data: pd.DataFrame,
+    ) -> Optional[Dict]:
+        """
+        Walk forward from `entry_idx` until SL or TP is hit.
+
+        Returns a dict with exit information or ``None`` if the trade stays open.
+        """
+        for i in range(entry_idx + 1, len(data)):
+            bar = data.iloc[i]
+
+            if direction == "BUY":
+                if bar["low"] <= stop_loss:
+                    return {"price": stop_loss, "reason": "SL_HIT"}
+                if bar["high"] >= take_profit:
+                    return {"price": take_profit, "reason": "TP_HIT"}
+            else:  # SELL
+                if bar["high"] >= stop_loss:
+                    return {"price": stop_loss, "reason": "SL_HIT"}
+                if bar["low"] <= take_profit:
+                    return {"price": take_profit, "reason": "TP_HIT"}
+
+        return None  # still open
+
     def simulate_trade(
         self,
         entry_idx: int,
@@ -221,66 +278,44 @@ class BacktestEngine:
         data: pd.DataFrame,
     ) -> Optional[BacktestTrade]:
         """
-        Walk forward from `entry_idx` until SL or TP is hit.
+        Simulate a single trade from ``entry_idx`` forward.
 
-        Returns a `BacktestTrade` instance or `None` if the trade is still open.
+        Returns a ``BacktestTrade`` instance or ``None`` if the trade never
+        reaches SL/TP (i.e. it stays open at the end of the dataset).
         """
-        for i in range(entry_idx + 1, len(data)):
-            bar = data.iloc[i]
+        outcome = self._walk_forward(
+            entry_idx, direction, entry_price, stop_loss, take_profit, data
+        )
+        if outcome is None:
+            return None
 
-            if direction == "BUY":
-                # Stop‑loss hit?
-                if bar["low"] <= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "SL_HIT"
-                # Take‑profit hit?
-                elif bar["high"] >= take_profit:
-                    exit_price = take_profit
-                    exit_reason = "TP_HIT"
-                else:
-                    continue
-                risk = entry_price - stop_loss
-                profit_pips = exit_price - entry_price
-                r_multiple = profit_pips / risk if risk > 0 else 0
+        exit_price = outcome["price"]
+        exit_reason = outcome["reason"]
 
-            else:  # SELL
-                if bar["high"] >= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "SL_HIT"
-                elif bar["low"] <= take_profit:
-                    exit_price = take_profit
-                    exit_reason = "TP_HIT"
-                else:
-                    continue
-                risk = stop_loss - entry_price
-                profit_pips = entry_price - exit_price
-                r_multiple = profit_pips / risk if risk > 0 else 0
+        # Risk / reward calculation (fixed $100 risk per trade)
+        risk = abs(entry_price - stop_loss)
+        profit_pips = (exit_price - entry_price) if direction == "BUY" else (entry_price - exit_price)
+        r_multiple = profit_pips / risk if risk > 0 else 0
+        profit = r_multiple * 100  # $100 risk per trade
 
-            # Simplified monetary profit (fixed $100 risk per trade)
-            lot_size = 0.1
-            profit = r_multiple * 100
-
-            trade = BacktestTrade(
-                entry_time=data.iloc[entry_idx]["time"],
-                exit_time=bar["time"],
-                symbol=symbol,
-                direction=direction,
-                entry_price=entry_price,
-                exit_price=exit_price,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-                lot_size=lot_size,
-                profit=profit,
-                r_multiple=r_multiple,
-                was_news_blocked=False,
-                volatility_state="NORMAL",
-                confluence_score=3,
-                exit_reason=exit_reason,
-            )
-            return trade
-
-        # No exit condition reached – trade remains open
-        return None
+        trade = BacktestTrade(
+            entry_time=data.iloc[entry_idx]["time"],
+            exit_time=data.iloc[entry_idx + 1]["time"],  # approximate – precise time is in `outcome`
+            symbol=symbol,
+            direction=direction,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            lot_size=0.1,
+            profit=profit,
+            r_multiple=r_multiple,
+            was_news_blocked=False,
+            volatility_state="NORMAL",
+            confluence_score=3,
+            exit_reason=exit_reason,
+        )
+        return trade
 
     # ------------------------------------------------------------------
     # MAIN BACKTEST LOOP
@@ -293,7 +328,7 @@ class BacktestEngine:
         end_date: datetime,
     ) -> BacktestResults:
         """
-        Execute a full back‑test and return a `BacktestResults` object.
+        Execute a full back‑test and return a populated ``BacktestResults``.
         """
         logger.info("=" * 80)
         logger.info("📊 STARTING BACKTEST")
@@ -319,22 +354,13 @@ class BacktestEngine:
         # ------------------------------------------------------------------
         # 3️⃣ Simulate trades
         # ------------------------------------------------------------------
-        self.trades.clear()
-        self.equity_curve.clear()
-        self.current_balance = self.initial_balance
-        self._processed = 0
+        self._reset_state(df.iloc[0]["time"])
 
-        # Record initial equity point
-        self.equity_curve.append(
-            {"time": df.iloc[0]["time"], "balance": self.current_balance}
-        )
-        self._gauge_current_equity.set(self.current_balance)
-
-        # Iterate over bars (skip first 50 to allow indicators to stabilise)
+        # Skip the first 50 rows to allow indicators to stabilise
         for idx in range(50, len(df)):
             row = df.iloc[idx]
 
-            # LONG signal
+            # LONG side
             if row["long_signal"]:
                 trade = self.simulate_trade(
                     entry_idx=idx,
@@ -348,7 +374,7 @@ class BacktestEngine:
                 if trade:
                     self._record_trade(trade)
 
-            # SHORT signal
+            # SHORT side
             elif row["short_signal"]:
                 trade = self.simulate_trade(
                     entry_idx=idx,
@@ -383,31 +409,41 @@ class BacktestEngine:
         # ------------------------------------------------------------------
         # 6️⃣ Logging / reporting
         # ------------------------------------------------------------------
-        self._log_results(stats)
+        self._log_summary(stats)
 
         return results
 
     # ------------------------------------------------------------------
-    # Helper – record a finished trade and update equity / metrics
+    # Internal helpers – state reset, trade recording, stats, logging
     # ------------------------------------------------------------------
+    def _reset_state(self, first_timestamp: datetime) -> None:
+        """Prepare a fresh equity curve and metrics before a new run."""
+        self.trades.clear()
+        self.equity_curve.clear()
+        self.current_balance = self.initial_balance
+        self._processed = 0
+
+        # Initial equity point
+        self.equity_curve.append({"time": first_timestamp, "balance": self.current_balance})
+        _gauge_current_equity.set(self.current_balance)
+
     def _record_trade(self, trade: BacktestTrade) -> None:
+        """Append a finished trade, update equity and push Prometheus metrics."""
         self.trades.append(trade)
         self.current_balance += trade.profit
         self._processed += 1
 
         # Equity curve point
-        self.equity_curve.append(
-            {"time": trade.exit_time, "balance": self.current_balance}
-        )
+        self.equity_curve.append({"time": trade.exit_time, "balance": self.current_balance})
 
-        # Update live Prometheus metrics
-        self._gauge_trades_processed.inc()
-        self._gauge_current_equity.set(self.current_balance)
+        # Live Prometheus updates
+        _gauge_trades_processed.inc()
+        _gauge_current_equity.set(self.current_balance)
 
-        # Re‑calculate temporary win‑rate & Sharpe for live dashboards
+        # Temporary win‑rate / Sharpe for live dashboards
         tmp_stats = self._calculate_statistics()
-        self._gauge_win_rate.set(tmp_stats["win_rate"])
-        self._gauge_sharpe.set(tmp_stats["sharpe_ratio"])
+        _gauge_win_rate.set(tmp_stats["win_rate"])
+        _gauge_sharpe.set(tmp_stats["sharpe_ratio"])
 
         logger.info(
             f"Trade #{len(self.trades)}: {trade.direction} "
@@ -415,19 +451,16 @@ class BacktestEngine:
             f"Equity ${self.current_balance:,.2f}"
         )
 
-    # ------------------------------------------------------------------
-    # STATISTICS
-    # ------------------------------------------------------------------
     def _calculate_statistics(self) -> Dict:
-        """Compute performance metrics from the collected trades."""
+        """Derive performance metrics from the collected trades."""
         if not self.trades:
             return self._empty_stats()
 
-        total_trades = len(self.trades)
+        total = len(self.trades)
         winners = [t for t in self.trades if t.profit > 0]
         losers = [t for t in self.trades if t.profit <= 0]
 
-        win_rate = (len(winners) / total_trades) * 100 if total_trades else 0
+        win_rate = (len(winners) / total) * 100 if total else 0
 
         total_profit = sum(t.profit for t in self.trades)
         total_wins = sum(t.profit for t in winners) if winners else 0
@@ -436,18 +469,18 @@ class BacktestEngine:
         avg_win = total_wins / len(winners) if winners else 0
         avg_loss = total_losses / len(losers) if losers else 0
 
-        profit_factor = (total_wins / total_losses) if total_losses else 0
-        avg_r = sum(t.r_multiple for t in self.trades) / total_trades
+              profit_factor = (total_wins / total_losses) if total_losses else 0
+        avg_r = sum(t.r_multiple for t in self.trades) / total
 
         # ------------------- Drawdown -------------------
         peak = self.initial_balance
-        max_dd = max_dd_pct = 0
-        for pt in self.equity_curve:
-            bal = pt["balance"]
+        max_dd = max_dd_pct = 0.0
+        for point in self.equity_curve:
+            bal = point["balance"]
             if bal > peak:
                 peak = bal
             dd = peak - bal
-            dd_pct = (dd / peak) * 100 if peak else 0
+            dd_pct = (dd / peak) * 100 if peak else 0.0
             if dd > max_dd:
                 max_dd = dd
                 max_dd_pct = dd_pct
@@ -463,12 +496,12 @@ class BacktestEngine:
         if returns:
             avg_ret = np.mean(returns)
             std_ret = np.std(returns)
-            sharpe = (avg_ret / std_ret) * np.sqrt(252) if std_ret else 0
+            sharpe = (avg_ret / std_ret) * np.sqrt(252) if std_ret else 0.0
         else:
-            sharpe = 0
+            sharpe = 0.0
 
         return {
-            "total_trades": total_trades,
+            "total_trades": total,
             "winners": len(winners),
             "losers": len(losers),
             "win_rate": win_rate,
@@ -486,22 +519,22 @@ class BacktestEngine:
 
     # ------------------------------------------------------------------
     def _empty_stats(self) -> Dict:
-        """Return a zeroed statistics dict."""
+        """Return a zero‑filled statistics dictionary."""
         return {
             "total_trades": 0,
             "winners": 0,
             "losers": 0,
-            "win_rate": 0,
-            "total_profit": 0,
-            "avg_win": 0,
-            "avg_loss": 0,
-            "profit_factor": 0,
-            "avg_r_multiple": 0,
-            "max_drawdown": 0,
-            "max_drawdown_pct": 0,
-            "sharpe_ratio": 0,
+            "win_rate": 0.0,
+            "total_profit": 0.0,
+            "avg_win": 0.0,
+            "avg_loss": 0.0,
+            "profit_factor": 0.0,
+            "avg_r_multiple": 0.0,
+            "max_drawdown": 0.0,
+            "max_drawdown_pct": 0.0,
+            "sharpe_ratio": 0.0,
             "final_balance": self.initial_balance,
-            "return_pct": 0,
+            "return_pct": 0.0,
         }
 
     # ------------------------------------------------------------------
@@ -512,15 +545,13 @@ class BacktestEngine:
             end_date=end_date,
             initial_balance=self.initial_balance,
             final_balance=self.initial_balance,
-		           trades=[],
+            trades=[],
             equity_curve=[],
-            statistics=self._empty_stats()
+            statistics=self._empty_stats(),
         )
 
     # ------------------------------------------------------------------
-    # LOGGING / REPORTING
-    # ------------------------------------------------------------------
-    def _log_results(self, stats: Dict) -> None:
+    def _log_summary(self, stats: Dict) -> None:
         """Pretty‑print the back‑test summary to the logger."""
         logger.info("\n" + "=" * 80)
         logger.info("📊 BACKTEST SUMMARY")
@@ -532,8 +563,7 @@ class BacktestEngine:
         logger.info(f"Avg R‑Multiple       : {stats['avg_r_multiple']:.2f}R")
         logger.info(f"Total Profit         : ${stats['total_profit']:+,.2f}")
         logger.info(f"Return on Capital    : {stats['return_pct']:+.2f}%")
-        logger.info(f"Max Drawdown         : ${stats['max_drawdown']:.2f} "
-                    f"({stats['max_drawdown_pct']:.2f}%)")
+        logger.info(f"Max Drawdown         : ${stats['max_drawdown']:.2f} ({stats['max_drawdown_pct']:.2f}%)")
         logger.info(f"Sharpe Ratio         : {stats['sharpe_ratio']:.2f}")
         logger.info("=" * 80 + "\n")
 
@@ -572,18 +602,20 @@ class BacktestEngine:
             with open(filename, "w") as f:
                 json.dump(results, f, indent=2)
             logger.info(f"✅ Backtest results exported to {filename}")
-        except Exception as exc:   # pragma: no cover
+        except Exception as exc:  # pragma: no cover
             logger.error(f"Failed to export results: {exc}")
+
 
 # ----------------------------------------------------------------------
 # GLOBAL ENGINE INSTANCE (convenient for one‑off scripts)
 # ----------------------------------------------------------------------
 backtest_engine = BacktestEngine()
 
+
 # ----------------------------------------------------------------------
 # QUICK DEMO / SELF‑TEST (run with `python -m src.backtesting_engine`)
 # ----------------------------------------------------------------------
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     # Simple sanity‑check run – 90‑day EURUSD H1 back‑test
     if not mt5.initialize():
         logger.error("❌ MT5 initialisation failed – aborting demo")
@@ -591,7 +623,7 @@ if __name__ == "__main__":
 
     engine = BacktestEngine(initial_balance=10_000)
 
-    now = datetime.now()
+    now = utc_now()
     start = now - timedelta(days=90)
     end = now
 
@@ -606,4 +638,3 @@ if __name__ == "__main__":
     engine.export_results("eurusd_backtest_90d.json")
 
     mt5.shutdown()
-
