@@ -133,7 +133,7 @@ def _render_pdf(
     elements.append(Spacer(1, 12))
 
     # ---- Timestamp ------------------------------------------------
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
     elements.append(Paragraph(f"Generated: {now}", styles['Normal']))
     elements.append(Spacer(1, 12))
 
@@ -213,11 +213,11 @@ def _send_email(pdf_path: Path) -> None:
         return
 
     msg = EmailMessage()
-    msg['Subject'] = f"Citadel {REPORT_FREQUENCY.capitalize()} Report – {datetime.utcnow().date()}"
+    msg['Subject'] = f"Citadel {REPORT_FREQUENCY.capitalize()} Report – {datetime.now().date()}"
     msg['From'] = SMTP_USER
     msg['To'] = ', '.join(EMAIL_RECIPIENTS)
     msg.set_content(f"Attached is the latest {REPORT_FREQUENCY} audit‑ready report for the Citadel Quantum Trader.\n\n"
-                    f"Generated on {datetime.utcnow().isoformat()} UTC.")
+                    f"Generated on {datetime.now().isoformat()} UTC.")
 
     # Attach PDF
     with open(pdf_path, 'rb') as f:
@@ -273,7 +273,7 @@ def main() -> None:
         # Temporary file for the PDF
         out_dir = Path('/tmp')
         out_dir.mkdir(parents=True, exist_ok=True)
-        pdf_path = out_dir / f"citadel_report_{REPORT_FREQUENCY}_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.pdf"
+        pdf_path = out_dir / f"citadel_report_{REPORT_FREQUENCY}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
 
         _render_pdf(snapshot, config, summary, mc_dd, pdf_path)
 
