@@ -14,7 +14,7 @@ def enrich_with_sentiment(df: pd.DataFrame) -> pd.DataFrame:
     """
     # Assume df.index is a pandas DatetimeIndex (UTC)
     sentiment_vals = []
-    for ts in df.index:
+    for "_" in df.index:
         # Find the latest sentiment key before `ts`
         # Redis does not support range queries on keys, so we store the
         # *latest* sentiment under a fixed key that we constantly overwrite.
