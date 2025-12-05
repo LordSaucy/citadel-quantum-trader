@@ -95,7 +95,7 @@ def main() -> int:
     # -------------------------------------------------------------
     # 3️⃣  Monitoring loop (same as paper‑trading)
     # -------------------------------------------------------------
-    start_time = datetime.utcnow()
+    start_time = datetime.now()
     trade_counter = 0
     max_latency = 0.0
     total_rejects = 0
@@ -116,7 +116,7 @@ def main() -> int:
 
         trade_counter = int(prom_query('sum(cqt_orders_total{shadow="yes"})'))
 
-        elapsed = datetime.utcnow() - start_time
+        elapsed = datetime.now() - start_time
         if trade_counter >= MAX_TRADE_COUNT:
             print(f"🏁 Reached {trade_counter} shadow trades – stopping")
             break
