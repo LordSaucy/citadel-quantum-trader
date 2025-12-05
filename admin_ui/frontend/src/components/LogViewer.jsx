@@ -1,3 +1,4 @@
+// admin_ui/frontend/src/components/LogViewer.jsx
 import React, { useEffect, useState, useRef } from "react";
 import {
   Box,
@@ -10,17 +11,30 @@ import {
   CircularProgress,
 } from "@mui/material";
 
+/**
+ * Helper: generate a stable list of bucket identifiers.
+ * If you later add/remove buckets dynamically, replace this
+ * static array with a fetch from the backend.
+ */
+const BUCKETS = Array.from({ length: 6 }, (_, i) => ({
+  id: `citadel-bot-${i + 1}`,
+  label: `citadel‑bot‑${i + 1}`,
+}));
+
 export default function LogViewer() {
-  const [container, setContainer] = useState("citadel-bot-1"); // default bucket
-  const [logLines, setLogLines] = useState([]);
+  // -----------------------------------------------------------------
+  // State
+  // -----------------------------------------------------------------
+  const [container, setContainer] = useState(BUCKETS[0].id); // default bucket
+  const [logLines, setLogLines] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const eventSourceRef = useRef(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   // -----------------------------------------------------------------
-  // When container changes, open a new EventSource (Server‑Sent Events)
+  // Effect – (re)connect to the SSE endpoint whenever `container` changes
   // -----------------------------------------------------------------
   useEffect(() => {
-    // Clean up previous stream
+    // Clean up any previous EventSource
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
@@ -28,46 +42,53 @@ export default function LogViewer() {
     setLoading(true);
     setLogLines([]);
 
-    // FastAPI can stream logs as SSE – we’ll use that endpoint
+    // NOTE: FastAPI streams logs via `/api/logs/:container` (SSE)
     const es = new EventSource(`/api/logs/${container}`);
     eventSourceRef.current = es;
 
     es.onmessage = (e) => {
-      setLogLines((prev) => [...prev, e.data].slice(-500)); // keep last 500 lines
+      // Keep only the most recent 500 lines to avoid memory bloat
+      setLogLines((prev) => [...prev, e.data].slice(-500));
     };
+
     es.onerror = (err) => {
       console.error("SSE error", err);
       es.close();
       setLoading(false);
     };
+
     es.onopen = () => setLoading(false);
 
-    return () => es.close();
+    // Cleanup when component unmounts or container changes
+    return () => {
+      es.close();
+    };
   }, [container]);
 
   // -----------------------------------------------------------------
-  // Render UI
+  // Render
   // -----------------------------------------------------------------
   return (
     <Box sx={{ mt: 2 }}>
+      {/* ---------- Bucket selector ---------- */}
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel id="container-select-label">Select Bucket</InputLabel>
         <Select
           labelId="container-select-label"
           value={container}
           label="Select Bucket"
-          onChange={(e) => setContainer(e.target.value)}
+          onChange={(e) => setContainer(e.target.value as string)}
         >
-          {/* List of bucket containers – you can generate this list from the
-              backend if you prefer; hard‑coded for demo */}
-          {[...Array(6)].map((_, i) => (
-            <MenuItem key={i} value={`citadel-bot-${i + 1}`}>
-              citadel‑bot‑{i + 1}
+          {/* Use a stable key derived from the bucket id */}
+          {BUCKETS.map((b) => (
+            <MenuItem key={b.id} value={b.id}>
+              {b.label}
             </MenuItem>
           ))}
         </Select>
       </FormControl>
 
+      {/* ---------- Log pane ---------- */}
       <Paper
         elevation={3}
         sx={{
@@ -82,8 +103,10 @@ export default function LogViewer() {
         {loading ? (
           <CircularProgress size={24} />
         ) : (
+          // Use a stable key – the log line itself is unique enough for a live tail.
+          // If you ever get duplicate lines, you can prepend a timestamp or UUID.
           logLines.map((ln, idx) => (
-            <Typography key={idx} variant="body2" component="pre">
+            <Typography key={`${container}-${idx}`} variant="body2" component="pre">
               {ln}
             </Typography>
           ))
