@@ -417,7 +417,7 @@ def persist_best(run_id, cfg, fitness, metrics, notes=""):
         "VALUES (?, ?, ?, ?, ?, ?)",
         (
             run_id,
-            datetime.datetime.utcnow().isoformat(),
+            datetime.datetime.now().isoformat(),
             json.dumps(cfg),
             fitness,
             json.dumps(metrics),
