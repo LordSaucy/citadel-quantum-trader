@@ -11,20 +11,26 @@ import yaml from "js-yaml";
 import axios from "axios";
 
 export default function ConfigEditor() {
-  const [configObj, setConfigObj] = useState(null);
+  // -----------------------------------------------------------------
+  // State we actually use
+  // -----------------------------------------------------------------
   const [yamlText, setYamlText] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState({ open: false, text: "", severity: "info" });
+  const [msg, setMsg] = useState({
+    open: false,
+    text: "",
+    severity: "info",
+  });
 
   // -----------------------------------------------------------------
-  // Load config on mount
+  // Load config on mount (convert JSON → YAML for the editor)
   // -----------------------------------------------------------------
   useEffect(() => {
     const fetchConfig = async () => {
       try {
         const { data } = await axios.get("/api/config");
-        setConfigObj(data);
+        // We only need the YAML representation for the UI
         setYamlText(yaml.dump(data));
       } catch (e) {
         console.error(e);
@@ -38,10 +44,10 @@ export default function ConfigEditor() {
       }
     };
     fetchConfig();
-  }, []);
+  }, []); // ← empty dependency array = run once on mount
 
   // -----------------------------------------------------------------
-  // Save handler – validates YAML before sending
+  // Save handler – validates YAML before sending it to the backend
   // -----------------------------------------------------------------
   const handleSave = async () => {
     let parsed;
@@ -59,7 +65,7 @@ export default function ConfigEditor() {
     setSaving(true);
     try {
       await axios.put("/api/config", parsed);
-      setConfigObj(parsed);
+      // No need to keep a separate config object; the UI already shows the YAML text
       setMsg({
         open: true,
         text: "✅ Config saved and will be hot‑reloaded",
@@ -77,10 +83,14 @@ export default function ConfigEditor() {
     }
   };
 
-  if (loading) return <CircularProgress />;
+  // -----------------------------------------------------------------
+  // Render
+  // -----------------------------------------------------------------
+  if (loading) return null; // nothing to show while we fetch
 
   return (
     <Box sx={{ mt: 2 }}>
+      {/* YAML editor */}
       <TextField
         label="config.yaml (YAML)"
         multiline
@@ -93,6 +103,7 @@ export default function ConfigEditor() {
         sx={{ fontFamily: "monospace", mb: 2 }}
       />
 
+      {/* Save button */}
       <Button
         variant="contained"
         color="primary"
@@ -102,8 +113,10 @@ export default function ConfigEditor() {
         💾 Save & Reload
       </Button>
 
+      {/* Spinner while saving */}
       {saving && <CircularProgress size={24} sx={{ ml: 2 }} />}
 
+      {/* Snackbar for success / error messages */}
       <Snackbar
         open={msg.open}
         autoHideDuration={6000}
