@@ -421,7 +421,7 @@ class MTFDataAnalyzer:
         try:
             summary = {
                 'symbol': self.symbol,
-                'generated_at': datetime.utcnow().isoformat(),
+                'generated_at': datetime.now().isoformat(),
                 'total_rows': len(self.alignment),
                 'overall': {
                     'avg_score': float(self.alignment['alignment_score'].mean()),
