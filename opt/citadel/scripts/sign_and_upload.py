@@ -49,7 +49,7 @@ def build_manifest(snapshot_key: str, merkle_root: str, signature_b64: str) -> b
         "snapshot_key": snapshot_key,
         "merkle_root": merkle_root,
         "signature_b64": signature_b64,
-        "signed_at_utc": datetime.datetime.utcnow().isoformat() + "Z"
+        "signed_at_utc": datetime.datetime.now().isoformat() + "Z"
     }
     return json.dumps(manifest, separators=(',', ':')).encode('utf-8')
 
