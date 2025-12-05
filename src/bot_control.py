@@ -7,4 +7,4 @@ def set_bucket_flag(bucket_id: int, enabled: bool):
 
 def get_bucket_flag(bucket_id: int) -> bool:
     val = r.get(f"bucket:{bucket_id}:use_schedule")
-    return bool(int(val)) if val is not None else True   # default = True
+    return bool(int(val)) if val is not None else True   
