@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 """
 CAPITAL MANAGEMENT SYSTEM
 
@@ -8,9 +8,12 @@ that publishes Prometheus metrics and offers a tiny Flask HTTP API so
 Grafana (or any external tool) can read / modify the parameters
 without restarting the bot.
 
+✅ SECURITY: CSRF protection enabled on all POST/PUT/PATCH endpoints.
+   GET endpoints remain unprotected (safe by design).
+
 Author: Lawful Banker
 Created: 2024‑11‑26
-Version: 2.0 – Production‑Ready
+Version: 2.1 – Production‑Ready with CSRF Protection
 """
 
 # ----------------------------------------------------------------------
@@ -19,6 +22,7 @@ Version: 2.0 – Production‑Ready
 import json
 import logging
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Thread
@@ -30,6 +34,7 @@ from typing import Dict, Optional
 # ----------------------------------------------------------------------
 import flask                     # pip install flask
 from flask import Flask, jsonify, request, abort
+from flask_wtf.csrf import CSRFProtect
 from prometheus_client import Gauge   # already a dependency of the project
 
 # ----------------------------------------------------------------------
@@ -73,8 +78,8 @@ class CapitalManager:
 
         logger.info("Capital Manager initialised:")
         logger.info(f"  Total   : ${self.total_capital:,.2f}")
-        logger.info(f"  Deployed: ${self.deployed_capital:,.2f} ({self.deployment_pct:.0f} %)")
-        logger.info(f"  Reserve : ${self.reserve_capital:,.2f} ({100-self.deployment_pct:.0f} %)")
+        logger.info(f"  Deployed: ${self.deployed_capital:,.2f} ({self.deployment_pct:.0f} %)")
+        logger.info(f"  Reserve : ${self.reserve_capital:,.2f} ({100-self.deployment_pct:.0f} %)")
 
     # ------------------------------------------------------------------
     def _recalc_deployment(self) -> None:
@@ -98,9 +103,9 @@ class CapitalManager:
         Recommended risk per trade (percentage of *deployed* capital).
 
         The rule‑of‑thumb scales with account size:
-            • < $10 k  → 5‑7 %
-            • $10‑50 k → 3‑5 %
-            • > $50 k → 2‑3 %
+            • < $10 k  → 5‑7 %
+            • $10‑50 k → 3‑5 %
+            • > $50 k → 2‑3 %
         """
         if self.deployed_capital < 10_000:
             return 5.0
@@ -133,7 +138,7 @@ class CapitalManager:
             logger.warning("Zero distance between entry and stop‑loss – returning 0 lot")
             return 0.0
 
-        # Simplified lot calculation – 100 000 units per standard lot.
+        # Simplified lot calculation – 100 000 units per standard lot.
         lot_size = risk_amount / (risk_pips * 100_000.0)
         lot_size = round(lot_size, 2)
 
@@ -211,7 +216,7 @@ class WithdrawalStrategy:
         """
         Compute the amount to withdraw given the current profit figure.
 
-        The algorithm never lets the reserve drop below 90 % of the total
+        The algorithm never lets the reserve drop below 90 % of the total
         capital (protects the core bankroll).
         """
         withdraw_pct = self.strategy["withdraw_pct"]
@@ -220,7 +225,7 @@ class WithdrawalStrategy:
 
         withdrawal = profits * (withdraw_pct / 100.0)
 
-        # Protect the core capital – keep at least 90 % of total in reserve
+        # Protect the core capital – keep at least 90 % of total in reserve
         min_allowed_reserve = capital * 0.90
         if capital - withdrawal < min_allowed_reserve:
             withdrawal = max(0.0, capital - min_allowed_reserve)
@@ -239,6 +244,7 @@ class WithdrawalStrategy:
 
 # ----------------------------------------------------------------------
 # 4️⃣  Runtime‑tunable controller (Mission‑Control)
+# ✅ SECURITY: CSRF protection enabled on state-changing endpoints
 # ----------------------------------------------------------------------
 class CapitalController:
     """
@@ -248,6 +254,8 @@ class CapitalController:
 
     The configuration is persisted to JSON on disk (mounted volume) so
     changes survive container restarts.
+    
+    ✅ SECURITY: CSRF protection enabled on all POST/PUT/PATCH endpoints.
     """
 
     # ------------------------------------------------------------------
@@ -346,6 +354,51 @@ class CapitalController:
         return self.values[key]
 
     # ------------------------------------------------------------------
+    # ✅ SECURITY FIX: Secure SECRET_KEY management
+    # ------------------------------------------------------------------
+    def _get_or_create_secret_key(self) -> str:
+        """
+        ✅ SECURITY FIX: Retrieve SECRET_KEY from environment or generate/persist one.
+        
+        Priority:
+        1. FLASK_CAPITAL_SECRET_KEY environment variable (for production)
+        2. Persisted key file (generated once, reused across restarts)
+        3. Generate new cryptographically-secure key (fallback)
+        """
+        # 1. Check environment variable first
+        env_key = os.getenv('FLASK_CAPITAL_SECRET_KEY')
+        if env_key:
+            logger.info("📌 Capital SECRET_KEY loaded from FLASK_CAPITAL_SECRET_KEY environment variable")
+            return env_key
+        
+        # 2. Check persisted key file
+        secret_file = Path("/app/config/capital_secret_key")
+        if secret_file.exists():
+            try:
+                with open(secret_file, 'r') as f:
+                    persisted_key = f.read().strip()
+                    if persisted_key and len(persisted_key) >= 32:
+                        logger.info("📌 Capital SECRET_KEY loaded from persisted secure key file")
+                        return persisted_key
+            except Exception as exc:
+                logger.warning(f"⚠️ Could not read persisted Capital SECRET_KEY: {exc}")
+        
+        # 3. Generate new cryptographically-secure key
+        new_key = secrets.token_urlsafe(32)
+        
+        # Persist for consistency across restarts
+        try:
+            secret_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(secret_file, 'w') as f:
+                f.write(new_key)
+            secret_file.chmod(0o600)
+            logger.info(f"✅ Generated and persisted new Capital SECRET_KEY")
+        except Exception as exc:
+            logger.warning(f"⚠️ Could not persist Capital SECRET_KEY: {exc}")
+        
+        return new_key
+
+    # ------------------------------------------------------------------
     # File‑watcher – reloads the JSON if someone edited it manually
     # ------------------------------------------------------------------
     def _start_file_watcher(self) -> None:
@@ -367,24 +420,43 @@ class CapitalController:
         Thread(target=_watch, daemon=True, name="capital-config-watcher").start()
 
     # ------------------------------------------------------------------
-    # Flask API – runs on 0.0.0.0:5006 (exposed via Docker‑compose)
+    # ✅ SECURITY FIX: Flask API with CSRF protection
     # ------------------------------------------------------------------
     def _start_flask_api(self) -> None:
+        """
+        Spin up a tiny Flask API with CSRF protection.
+        
+        GET endpoints (read-only) are unprotected – safe by design.
+        POST/PUT/PATCH endpoints (state-changing) require CSRF tokens.
+        """
         app = Flask(__name__)
+
+        # ✅ SECURITY FIX: Use secure SECRET_KEY (environment > persisted > generated)
+        app.config['SECRET_KEY'] = self._get_or_create_secret_key()
+        
+        # ✅ SECURITY FIX: Enable CSRF protection
+        csrf = CSRFProtect(app)
 
         @app.route("/config", methods=["GET"])
         def get_all():
-            """Return the whole config as JSON."""
+            """GET endpoint – no CSRF protection needed (read-only)."""
             return jsonify(self.values)
 
         @app.route("/config/<key>", methods=["GET"])
         def get_one(key: str):
+            """GET endpoint – no CSRF protection needed (read-only)."""
             if key not in self.values:
                 abort(404, description=f"Parameter {key} not found")
             return jsonify({key: self.values[key]})
 
         @app.route("/config/<key>", methods=["POST", "PUT", "PATCH"])
+        @csrf.protect  # ✅ SECURITY: CSRF token required
         def set_one(key: str):
+            """
+            POST/PUT/PATCH endpoint – CSRF protected.
+            
+            Clients must provide X-CSRFToken header or include csrf_token in form data.
+            """
             if key not in self.values:
                 abort(404, description=f"Parameter {key} not found")
             try:
@@ -393,12 +465,12 @@ class CapitalController:
                     abort(400, description="JSON body must contain 'value'")
                 self.set(key, payload["value"])
                 return jsonify({key: self.values[key]})
-            except Exception as exc:   # pragma: no cover
-                logger.error(f"API error while setting {key}: {exc}")
-                abort(500, description=str(exc))
+            except (KeyError, ValueError) as exc:
+                abort(400, description=str(exc))
 
         @app.route("/healthz", methods=["GET"])
         def health():
+            """GET endpoint – no CSRF protection needed (health check)."""
             return "OK", 200
 
         def _run():
@@ -406,6 +478,7 @@ class CapitalController:
             app.run(host="0.0.0.0", port=5006, debug=False, use_reloader=False)
 
         Thread(target=_run, daemon=True, name="capital-flask-api").start()
+        logger.info("📡 Capital Flask API listening on 0.0.0.0:5006 (CSRF protected)")
 
     # ------------------------------------------------------------------
     # Graceful shutdown (called from the main process on SIGTERM)
@@ -420,4 +493,3 @@ class CapitalController:
 capital_manager = CapitalManager(total_capital=100_000.0, deployment_pct=80.0)
 withdrawal_strategy = WithdrawalStrategy(strategy="balanced")
 capital_controller = CapitalController()
-
