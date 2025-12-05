@@ -260,7 +260,7 @@ def log_run(best_cfg, fitness_score, duration):
     cur.execute(
         "INSERT INTO runs (run_ts, fitness, config_json, duration_s) VALUES (?,?,?,?)",
         (
-            datetime.utcnow().isoformat(),
+            datetime.now().isoformat(),
             fitness_score,
             json.dumps(best_cfg),
             duration
