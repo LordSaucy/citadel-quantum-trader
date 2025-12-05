@@ -2,21 +2,23 @@
 """
 LSTM Regime Forecasting Module
 
-Implements a simple (yet production‑ready) LSTM that predicts the
-probability that the market is in a “bullish” regime (value ∈ [0, 1]).
-The model is trained on a sliding window of historical features
-(e.g., price returns, volatility, macro indicators) and can be
-re‑trained on‑line or offline.
+Implements a production‑ready LSTM that predicts the probability that the
+market is in a “bullish” regime (value ∈ [0, 1]).  The model is trained on a
+sliding window of historical features (price returns, volatility, macro
+indicators) and can be re‑trained offline or on‑line.
 
 Typical usage:
 
-    >>> from src.lstm_regime import LSTMRegimeModel, RegimeModelError
-    >>> model = LSTMRegimeModel(cfg_path="config/regime.yaml")
-    >>> model.train(train_df, val_df)          # pandas DataFrames
-    >>> probs = model.predict(test_df)         # returns pd.Series
-    >>> model.save("models/lstm_regime.pt")   # persist the best checkpoint
+>>> from src.lstm_regime import LSTMRegimeModel, RegimeModelError
+>>> model = LSTMRegimeModel(cfg_path="config/regime.yaml")
+>>> model.train(train_df, val_df)          # pandas DataFrames
+>>> probs = model.predict(test_df)         # returns pd.Series
+>>> model.save("models/lstm_regime.pt")   # persist the best checkpoint
 """
 
+# ----------------------------------------------------------------------
+# Imports
+# ----------------------------------------------------------------------
 import json
 import logging
 import os
@@ -25,7 +27,7 @@ import random
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Mapping, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -33,52 +35,49 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.preprocessing import StandardScaler
-from torch.utils.data import DataLoader, Dataset, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 
-# ----------------------------------------------------------------------
 # Optional TensorBoard support – import lazily so the module works without it
-# ----------------------------------------------------------------------
-try:
-    from torch.utils.tensorboard import SummaryWriter  # type: ignore
+try:  # pragma: no cover
+    from torch.utils.tensorboard import SummaryWriter
 except Exception:  # pragma: no cover
     SummaryWriter = None  # type: ignore
 
 # ----------------------------------------------------------------------
-# Logging configuration (structured, JSON‑compatible)
+# Logging (JSON‑compatible, single handler)
 # ----------------------------------------------------------------------
 LOGGER = logging.getLogger(__name__)
-if not LOGGER.handlers:  # avoid duplicate handlers when reloading
+if not LOGGER.handlers:
     handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter(
-        fmt='%(asctime)s %(levelname)s %(name)s %(message)s',
-        datefmt='%Y-%m-%dT%H:%M:%S%z',
+        fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
     handler.setFormatter(formatter)
     LOGGER.addHandler(handler)
     LOGGER.setLevel(logging.INFO)
 
 # ----------------------------------------------------------------------
-# Custom exception – makes debugging easier for callers
+# Exceptions
 # ----------------------------------------------------------------------
 class RegimeModelError(RuntimeError):
     """Raised when something goes wrong inside the LSTM regime model."""
 
 
 # ----------------------------------------------------------------------
-# Utility: deterministic seeding (covers Python, NumPy, PyTorch, CUDA)
+# Deterministic seeding (Python, NumPy, PyTorch, CUDA)
 # ----------------------------------------------------------------------
 def seed_everything(seed: int = 42) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    # Ensure deterministic CuDNN behavior (may impact performance)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
 
 # ----------------------------------------------------------------------
-# Simple LSTM network – you can extend it later (bidirectional, dropout, …)
+# Simple LSTM network – extensible (bidirectional, dropout, …)
 # ----------------------------------------------------------------------
 class _LSTMNet(nn.Module):
     def __init__(
@@ -96,34 +95,33 @@ class _LSTMNet(nn.Module):
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
-        self.fc = nn.Linear(hidden_dim, 1)  # output = probability (sigmoid later)
+        self.fc = nn.Linear(hidden_dim, 1)  # output logits → sigmoid later
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x shape: (batch, seq_len, input_dim)
-        lstm_out, _ = self.lstm(x)  # lstm_out: (batch, seq_len, hidden_dim)
-        # Use the **last** time‑step representation for classification
-        last_step = lstm_out[:, -1, :]  # (batch, hidden_dim)
-        logits = self.fc(last_step)    # (batch, 1)
-        return logits.squeeze(-1)      # (batch,)
+        lstm_out, _ = self.lstm(x)            # (batch, seq_len, hidden_dim)
+        last_step = lstm_out[:, -1, :]        # (batch, hidden_dim)
+        logits = self.fc(last_step)           # (batch, 1)
+        return logits.squeeze(-1)             # (batch,)
 
 
 # ----------------------------------------------------------------------
-# Dataset wrapper – handles scaling & sliding‑window creation
+# Sliding‑window Dataset wrapper
 # ----------------------------------------------------------------------
 class _WindowDataset(Dataset):
     """
-    Turns a 2‑D array (samples × features) into a sliding‑window
-    dataset suitable for LSTM training.
+    Turns a 2‑D array (samples × features) into a sliding‑window dataset
+    suitable for LSTM training.
 
     Parameters
     ----------
     data : np.ndarray
-        Shape (n_samples, n_features). Must be already scaled.
+        Shape (n_samples, n_features). Must already be scaled.
     window : int
         Length of the temporal window (number of timesteps).
     target : np.ndarray | None
         1‑D array of target values aligned with ``data`` (same length).
-        If ``None`` the dataset will only return inputs (useful for inference).
+        If ``None`` the dataset returns only inputs (useful for inference).
     """
 
     def __init__(
@@ -141,7 +139,6 @@ class _WindowDataset(Dataset):
         self.data = data.astype(np.float32)
         self.target = target.astype(np.float32) if target is not None else None
 
-        # Number of windows we can extract
         self.n_windows = len(data) - window + 1
         if self.n_windows <= 0:
             raise ValueError(
@@ -160,14 +157,13 @@ class _WindowDataset(Dataset):
         if self.target is None:
             return x_tensor, None
 
-        # Target is aligned with the *last* element of the window
-        y = self.target[end - 1]
+        y = self.target[end - 1]                     # target aligned to last timestep
         y_tensor = torch.tensor(y, dtype=torch.float32)
         return x_tensor, y_tensor
 
 
 # ----------------------------------------------------------------------
-# Main façade – handles config, training, inference, persistence
+# Main façade – config, training, inference, persistence
 # ----------------------------------------------------------------------
 @dataclass
 class LSTMRegimeModel:
@@ -182,34 +178,36 @@ class LSTMRegimeModel:
     """
 
     # ------------------------------------------------------------------
-    # Configuration (populated from a dict or a YAML/JSON file)
+    # Public configuration (can be overridden via a dict or a YAML file)
     # ------------------------------------------------------------------
     cfg: Mapping[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
-    # Internals – populated after ``_prepare`` is called
+    # Internals (populated after ``_prepare``)
     # ------------------------------------------------------------------
     device: torch.device = field(init=False)
     scaler: StandardScaler = field(init=False)
     model: _LSTMNet = field(init=False)
+    optimizer: optim.Optimizer = field(init=False)
     best_checkpoint_path: Optional[pathlib.Path] = field(default=None, init=False)
+    tb_writer: Optional[SummaryWriter] = field(default=None, init=False)
 
     # ------------------------------------------------------------------
-    # Default configuration (can be overridden via a file or dict)
+    # Default configuration (merged with user‑supplied ``cfg``)
     # ------------------------------------------------------------------
     DEFAULT_CFG: Mapping[str, Any] = field(
         default_factory=lambda: {
             "seed": 42,
             "window": 30,                     # timesteps per sample
-            "input_dim": None,                # inferred from data if omitted
             "hidden_dim": 64,
             "num_layers": 2,
             "dropout": 0.2,
             "batch_size": 128,
             "lr": 1e-3,
+            "weight_decay": 0.0,              # ← added hyper‑parameter
             "max_epochs": 200,
-            "patience": 15,                   # early‑stopping patience
-            "min_delta": 1e-4,                # improvement threshold
+            "patience": 15,
+            "min_delta": 1e-4,
             "checkpoint_dir": "./models/checkpoints",
             "tensorboard_logdir": "./logs/tensorboard",
             "use_tensorboard": False,
@@ -217,19 +215,16 @@ class LSTMRegimeModel:
     )
 
     # ------------------------------------------------------------------
-    # Lifecycle methods
+    # Lifecycle
     # ------------------------------------------------------------------
     def __post_init__(self) -> None:
-        """Merge user config with defaults and initialise the device."""
-        # Merge with defaults (user config wins)
-        merged = dict(self.DEFAULT_CFG)  # shallow copy
-        merged.update(self.cfg)          # overwrite defaults
+        """Merge user config with defaults, set seeds, device, and logging."""
+        merged = dict(self.DEFAULT_CFG)
+        merged.update(self.cfg)               # user values win
         self.cfg = merged
 
-        # Set deterministic seeds
         seed_everything(int(self.cfg.get("seed", 42)))
 
-        # Device selection (CUDA if available)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         LOGGER.info(f"LSTMRegimeModel initialised on device: {self.device}")
 
@@ -237,20 +232,18 @@ class LSTMRegimeModel:
         ckpt_dir = pathlib.Path(self.cfg["checkpoint_dir"])
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-        # TensorBoard writer (optional)
+        # Optional TensorBoard
         if self.cfg.get("use_tensorboard", False) and SummaryWriter is not None:
             tb_dir = pathlib.Path(self.cfg["tensorboard_logdir"])
             tb_dir.mkdir(parents=True, exist_ok=True)
             self.tb_writer = SummaryWriter(log_dir=str(tb_dir))
             LOGGER.info(f"TensorBoard logging enabled at {tb_dir}")
-        else:
-            self.tb_writer = None
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
     def _build_model(self, input_dim: int) -> None:
-        """Instantiate the LSTM network with the supplied input dimension."""
+        """Instantiate the LSTM network."""
         self.model = _LSTMNet(
             input_dim=input_dim,
             hidden_dim=int(self.cfg["hidden_dim"]),
@@ -267,31 +260,21 @@ class LSTMRegimeModel:
         df: pd.DataFrame,
         target_col: str,
         fit_scaler: bool = True,
-    ) -> Tuple[TensorDataset, TensorDataset, StandardScaler]:
-        """
-        Scale features, split into train/val, and wrap into ``TensorDataset`` objects.
-        Returns (train_dataset, val_dataset, scaler).
-        """
+    ) -> Tuple[_WindowDataset, _WindowDataset, StandardScaler]:
+        """Scale features, split temporally, and return train/val WindowDatasets."""
         if target_col not in df.columns:
-            raise RegimeModelError(f"Target column `{target_col}` not found in DataFrame")
+            raise RegimeModelError(f"Target column `{target_col}` not found")
 
-        # Separate features & target
         X_raw = df.drop(columns=[target_col]).values.astype(np.float32)
         y_raw = df[target_col].values.astype(np.float32)
 
-        # Scale features (fit on training set only)
         scaler = StandardScaler()
-        if fit_scaler:
-            X_scaled = scaler.fit_transform(X_raw)
-        else:
-            X_scaled = scaler.transform(X_raw)
+        X_scaled = scaler.fit_transform(X_raw) if fit_scaler else scaler.transform(X_raw)
 
-        # Split (80 % train / 20 % val) – keep temporal order!
         split_idx = int(0.8 * len(df))
         X_train, X_val = X_scaled[:split_idx], X_scaled[split_idx:]
         y_train, y_val = y_raw[:split_idx], y_raw[split_idx:]
 
-        # Build sliding‑window datasets
         window = int(self.cfg["window"])
         train_ds = _WindowDataset(X_train, window, y_train)
         val_ds = _WindowDataset(X_val, window, y_val)
@@ -304,7 +287,7 @@ class LSTMRegimeModel:
         val_loss: float,
         is_best: bool = False,
     ) -> None:
-        """Persist model state + optimizer + epoch."""
+        """Persist model, optimizer, scaler, and validation loss."""
         ckpt_path = pathlib.Path(self.cfg["checkpoint_dir"]) / f"epoch_{epoch:04d}.pt"
         checkpoint = {
             "epoch": epoch,
@@ -341,17 +324,15 @@ class LSTMRegimeModel:
         val_df : pd.DataFrame
             Validation data – same columns as ``train_df``.
         target_col : str, optional
-            Column name holding the binary regime label (0 = bear, 1 = bull).
+            Column name holding the binary regime label (0 = bear, 1 = bull).
         """
         # ------------------------------------------------------------------
-        # 1️⃣  Prepare data & scaler (fit on training set only)
+        # 1️⃣  Data preparation (fit scaler on training set only)
         # ------------------------------------------------------------------
+        full_df = pd.concat([train_df, val_df], ignore_index=True)
         train_ds, val_ds, self.scaler = self._prepare_data(
-            pd.concat([train_df, val_df], ignore_index=True),
-            target_col=target_col,
-            fit_scaler=True,
+            full_df, target_col=target_col, fit_scaler=True
         )
-        # Infer input dimension from the dataset
         sample_input, _ = train_ds[0]
         input_dim = sample_input.shape[-1]
         self._build_model(input_dim)
@@ -381,8 +362,9 @@ class LSTMRegimeModel:
         self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=float(self.cfg["lr"]),
+            weight_decay=float(self.cfg["weight_decay"]),   # ← added
         )
-        criterion = nn.BCEWithLogitsLoss()  # combines sigmoid + BCE
+        criterion = nn.BCEWithLogitsLoss()
 
         # ------------------------------------------------------------------
         # 4️⃣  Training loop with early‑stopping
@@ -399,27 +381,25 @@ class LSTMRegimeModel:
         start_time = time.time()
 
         for epoch in range(1, max_epochs + 1):
-            self.model.train()
-            epoch_losses: List[float] = []
-
+            # ----- training -----
+            self.model.train()                     # ensure training mode
+            train_losses = []
             for xb, yb in train_loader:
-                xb = xb.to(self.device)          # (batch, seq, feat)
-                yb = yb.to(self.device)          # (batch,)
+                xb = xb.to(self.device)
+                yb = yb.to(self.device)
 
                 self.optimizer.zero_grad()
-                logits = self.model(xb)           # (batch,)
+                logits = self.model(xb)
                 loss = criterion(logits, yb)
                 loss.backward()
                 self.optimizer.step()
-                epoch_losses.append(loss.item())
+                train_losses.append(loss.item())
 
-            train_loss = np.mean(epoch_losses)
+            train_loss = np.mean(train_losses)
 
-            # ---------------------------------------------------------
-            # Validation pass
-            # ---------------------------------------------------------
-            self.model.eval()
-            val_losses: List[float] = []
+            # ----- validation -----
+            self.model.eval()                      # switch to eval mode
+            val_losses = []
             with torch.no_grad():
                 for xb, yb in val_loader:
                     xb = xb.to(self.device)
@@ -430,9 +410,7 @@ class LSTMRegimeModel:
 
             val_loss = np.mean(val_losses)
 
-            # ---------------------------------------------------------
-            # Logging (console + optional TensorBoard)
-            # ---------------------------------------------------------
+            # ----- logging -----
             LOGGER.info(
                 f"[Epoch {epoch:04d}] train_loss={train_loss:.6f}  val_loss={val_loss:.6f}"
             )
@@ -440,29 +418,18 @@ class LSTMRegimeModel:
                 self.tb_writer.add_scalar("Loss/train", train_loss, epoch)
                 self.tb_writer.add_scalar("Loss/val", val_loss, epoch)
 
-            # ---------------------------------------------------------
-            # Early‑stopping logic
-            # ---------------------------------------------------------
+            # ----- early‑stopping & checkpointing -----
             is_best = val_loss + min_delta < best_val_loss
             if is_best:
                 best_val_loss = val_loss
                 epochs_no_improve = 0
-                self 
-                # -------------------------------------------------
-                # 5️⃣  Checkpointing
-                # -------------------------------------------------
-                self._save_checkpoint(epoch=epoch, val_loss=val_loss, is_best=is_best)
-
+                self._save_checkpoint(epoch=epoch, val_loss=val_loss, is_best=True)
             else:
                 epochs_no_improve += 1
                 LOGGER.debug(
-                    f"No improvement for {epochs_no_improve} epoch(s) "
-                    f"(patience={patience})"
+                    f"No improvement for {epochs_no_improve} epoch(s) (patience={patience})"
                 )
 
-            # -------------------------------------------------
-            # 6️⃣  Early‑stopping termination
-            # -------------------------------------------------
             if epochs_no_improve >= patience:
                 LOGGER.info(
                     f"Early stopping triggered after {epoch} epochs – "
@@ -493,14 +460,13 @@ class LSTMRegimeModel:
         Parameters
         ----------
         df : pd.DataFrame
-            Must contain the same feature columns that were used during training
-            (the target column is ignored if present).
+            Must contain the same feature columns that were used during training.
         batch_size : int | None
             Override the batch size for inference; defaults to the training
             ``batch_size`` config value.
         return_proba : bool
-            If ``True`` (default) returns the sigmoid‑scaled probability
-            (value ∈ [0, 1]); if ``False`` returns the raw logits.
+            If ``True`` (default) returns sigmoid‑scaled probabilities
+            (∈ [0, 1]); if ``False`` returns raw logits.
 
         Returns
         -------
@@ -516,21 +482,16 @@ class LSTMRegimeModel:
                 "Feature scaler is missing. Ensure the model was trained or loaded correctly."
             )
 
-        # -----------------------------------------------------------------
-        # 1️⃣  Prepare input – scale using the stored scaler
-        # -----------------------------------------------------------------
-        X_raw = df.values.astype(np.float32)
-        X_scaled = self.scaler.transform(X_raw)
+        # ----- 1️⃣  Scale input -----
+        x_raw = df.values.astype(np.float32)          # noqa: N806 (uppercase kept for clarity)
+        x_scaled = self.scaler.transform(x_raw)
 
-        # -----------------------------------------------------------------
-        # 2️⃣  Build sliding‑window dataset (no targets needed)
-        # -----------------------------------------------------------------
+        # -----
+                # ----- 2️⃣  Build sliding‑window dataset (no targets) -----
         window = int(self.cfg["window"])
         infer_ds = _WindowDataset(X_scaled, window, target=None)
 
-        # -----------------------------------------------------------------
-        # 3️⃣  DataLoader for batched inference
-        # -----------------------------------------------------------------
+        # ----- 3️⃣  DataLoader for batched inference -----
         bs = batch_size or int(self.cfg["batch_size"])
         loader = DataLoader(
             infer_ds,
@@ -540,30 +501,30 @@ class LSTMRegimeModel:
             num_workers=os.cpu_count() or 0,
         )
 
-        # -----------------------------------------------------------------
-        # 4️⃣  Model forward pass (no grad)
-        # -----------------------------------------------------------------
-        self.model.eval()
-        all_probs: List[float] = []
+        # ----- 4️⃣  Model forward pass (no gradient) -----
+        self.model.eval()                     # ensure dropout/batchnorm are disabled
+        all_outputs: list[float] = []
+        sigmoid = nn.Sigmoid()
+
         with torch.no_grad():
             for xb, _ in loader:
-                xb = xb.to(self.device)                     # (B, T, F)
-                logits = self.model(xb)                     # (B,)
+                xb = xb.to(self.device)      # (B, T, F)
+                logits = self.model(xb)       # (B,)
                 if return_proba:
-                    probs = torch.sigmoid(logits).cpu().numpy()
+                    probs = sigmoid(logits).cpu().numpy()
                 else:
                     probs = logits.cpu().numpy()
-                all_probs.extend(probs.tolist())
+                all_outputs.extend(probs.tolist())
 
-        # -----------------------------------------------------------------
-        # 5️⃣  Align predictions with the original DataFrame index.
-        #    The first (window‑1) rows cannot be predicted because we lack a
-        #    full temporal context; we fill them with NaN.
-        # -----------------------------------------------------------------
-        nan_padding = [np.nan] * (window - 1)
-        aligned = nan_padding + all_probs
+        # ----- 5️⃣  Align predictions with the original DataFrame index -----
+        # The first (window‑1) rows cannot be predicted because we lack a full
+        # temporal context; we pad them with NaN so the output length matches
+        # the input length.
+        padding = [np.nan] * (window - 1)
+        aligned = padding + all_outputs
+
         if len(aligned) != len(df):
-            # Defensive check – should never happen unless something went wrong
+            # Defensive sanity‑check – should never happen
             raise RegimeModelError(
                 f"Prediction length mismatch: expected {len(df)} values, got {len(aligned)}"
             )
@@ -580,6 +541,7 @@ class LSTMRegimeModel:
         containing:
 
         * ``model_state_dict``
+        * ``optimizer_state_dict``
         * ``scaler_state_dict``
         * ``config`` (the merged configuration dict)
         """
@@ -588,13 +550,12 @@ class LSTMRegimeModel:
 
         # Prefer the best checkpoint if we have one; otherwise serialize on‑the‑fly
         if self.best_checkpoint_path and self.best_checkpoint_path.is_file():
-            checkpoint_src = self.best_checkpoint_path
-            torch.save(torch.load(checkpoint_src), dest)
+            torch.save(torch.load(self.best_checkpoint_path), dest)
             LOGGER.info(f"Best checkpoint copied to {dest}")
         else:
-            # Serialize current state manually
             checkpoint = {
                 "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
                 "scaler_state_dict": self.scaler.state_dict(),
                 "config": dict(self.cfg),
             }
@@ -617,18 +578,19 @@ class LSTMRegimeModel:
         # -----------------------------------------------------------------
         loaded_cfg = checkpoint.get("config", {})
         if loaded_cfg:
+            # Merge loaded config on top of the current one (preserve defaults)
             self.cfg = {**self.cfg, **loaded_cfg}
             LOGGER.info("Configuration restored from checkpoint")
 
         # -----------------------------------------------------------------
-        # 2️⃣  Determine input dimension (required to rebuild the network)
+        # 2️⃣  Determine input dimension from the scaler state
         # -----------------------------------------------------------------
-        # The scaler holds the feature mean/std; we can infer dim from it.
-        if "scaler_state_dict" not in checkpoint:
+        scaler_state = checkpoint.get("scaler_state_dict")
+        if scaler_state is None:
             raise RegimeModelError("Checkpoint missing scaler state.")
         dummy_scaler = StandardScaler()
-        dummy_scaler.mean_ = checkpoint["scaler_state_dict"]["mean_"]
-        dummy_scaler.scale_ = checkpoint["scaler_state_dict"]["scale_"]
+        dummy_scaler.mean_ = scaler_state["mean_"]
+        dummy_scaler.scale_ = scaler_state["scale_"]
         input_dim = dummy_scaler.mean_.shape[0]
 
         # -----------------------------------------------------------------
@@ -639,21 +601,28 @@ class LSTMRegimeModel:
         self.model.to(self.device)
 
         # -----------------------------------------------------------------
-        # 4️⃣  Restore scaler
+        # 4️⃣  Restore optimizer (if present) and scaler
         # -----------------------------------------------------------------
-        self.scaler = dummy_scaler
+        if "optimizer_state_dict" in checkpoint:
+            # Re‑create optimizer with the same hyper‑parameters (including weight_decay)
+            self.optimizer = optim.Adam(
+                self.model.parameters(),
+                lr=float(self.cfg["lr"]),
+                weight_decay=float(self.cfg["weight_decay"]),
+            )
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-        LOGGER.info(f"Model and scaler loaded from {src}")
+        self.scaler = dummy_scaler
+        LOGGER.info(f"Model, optimizer, and scaler loaded from {src}")
 
     # ------------------------------------------------------------------
-    # Convenience representation
+    # Representation
     # ------------------------------------------------------------------
     def __repr__(self) -> str:  # pragma: no cover
-        cfg_summary = json.dumps(
-            {k: v for k, v in self.cfg.items() if k != "checkpoint_dir"},
-            indent=2,
-        )
+        # Hide large objects (scaler, model) – only show a concise summary
+        safe_cfg = {k: v for k, v in self.cfg.items() if k != "checkpoint_dir"}
+        cfg_pretty = json.dumps(safe_cfg, indent=2)
         return (
             f"<LSTMRegimeModel device={self.device} "
-            f"config={cfg_summary}>"
+            f"config={cfg_pretty}>"
         )
