@@ -31,7 +31,7 @@ async def pause(req: PauseReq | None = None, token: str = Depends(get_current_us
 @router.post("/resume", response_model=dict)
 async def resume(token: str = Depends(get_current_user)):
     engine.resume()
-    return {"paused": False, "resumed_at": datetime.utcnow(timezone.utc).isoformat()+"Z"}
+    return {"paused": False, "resumed_at": datetime.now(timezone.utc).isoformat()+"Z"}
 
 @router.post("/kill", response_model=dict)
 async def kill(req: KillReq, token: str = Depends(get_current_user)):
