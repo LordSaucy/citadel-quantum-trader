@@ -30,7 +30,7 @@ def fetch_transactions():
     return rows
 
 def build_sftr_xml(trades):
-    root = ET.Element('SFTRReport', attrib={'creationDateTime': datetime.datetime.utcnow(datetime.timezone.utc).isoformat()})
+    root = ET.Element('SFTRReport', attrib={'creationDateTime': datetime.datetime.now(datetime.timezone.utc).isoformat()})
     for tr in trades:
         tx = ET.SubElement(root, 'Transaction')
         ET.SubElement(tx, 'BucketID').text = str(tr['bucket_id'])
