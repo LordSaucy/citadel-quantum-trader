@@ -551,3 +551,35 @@ jobs:
   with:
     name: walkforward-results
     path: walkforward_results.csv
+
+    # .github/workflows/ci.yml (append)
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dev tools
+        run: |
+          pip install ruff black isort radon
+          npm ci
+      - name: Lint Python
+        run: |
+          ruff check src/ scripts/ --exit-zero
+          ruff check src/ scripts/ --fix
+          black src/ scripts/
+          isort src/ scripts/
+          radon cc src/ --average --show-complexity
+      - name: Lint JS/TS
+        run: npx eslint src/admin_ui/frontend/src/ --max-warnings=0
+      - name: Lint Shell
+        run: shellcheck -x scripts/**/*.sh
+      - name: Run Tests
+        run: pytest -q
+      - name: SonarQube Scan
+        uses: sonarsource/sonarcloud-github-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
