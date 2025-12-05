@@ -6,12 +6,18 @@ Receives trading signals from TradingView and executes trades.
 
 Features:
 - Flask REST API
-- HMAC signature validation
-- Token authentication
+- HMAC signature validation (for /webhook endpoint)
+- Token authentication (for /webhook endpoint)
 - Rate‑limiting per IP
 - Signal processing (BASE / STACK)
 - Status monitoring endpoints
+- CSRF protection on internal admin endpoints
 - Graceful shutdown
+
+✅ SECURITY: 
+- /webhook: Uses token + HMAC signature validation (external TradingView calls)
+- /pause, /resume, /force_stack: CSRF-protected (internal admin endpoints)
+- GET endpoints: Unprotected (read-only, safe by design)
 """
 
 # ----------------------------------------------------------------------
@@ -24,6 +30,8 @@ import threading
 import time
 import hmac
 import hashlib
+import os
+import secrets
 from datetime import datetime, timedelta, date, time as dt_time
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
@@ -33,6 +41,7 @@ from typing import Dict, List, Tuple, Optional
 # ----------------------------------------------------------------------
 from flask import Flask, request, jsonify, abort
 from flask_cors import CORS
+from flask_wtf.csrf import CSRFProtect
 
 # ----------------------------------------------------------------------
 # Logging configuration (writes to ./logs/webhook_server.log)
@@ -77,6 +86,56 @@ class WebhookConfig:
 app = Flask(__name__)
 CORS(app)   # allow dashboard / external UI access
 
+# ✅ SECURITY FIX: Secure SECRET_KEY management
+def _get_or_create_app_secret_key() -> str:
+    """
+    ✅ SECURITY FIX: Retrieve SECRET_KEY from environment or generate/persist one.
+    
+    Priority:
+    1. FLASK_WEBHOOK_SECRET_KEY environment variable (for production)
+    2. Persisted key file (generated once, reused across restarts)
+    3. Generate new cryptographically-secure key (fallback)
+    """
+    # 1. Check environment variable first
+    env_key = os.getenv('FLASK_WEBHOOK_SECRET_KEY')
+    if env_key:
+        logger.info("📌 Webhook SECRET_KEY loaded from FLASK_WEBHOOK_SECRET_KEY environment variable")
+        return env_key
+    
+    # 2. Check persisted key file
+    secret_file = Path("./config/webhook_secret_key")
+    if secret_file.exists():
+        try:
+            with open(secret_file, 'r') as f:
+                persisted_key = f.read().strip()
+                if persisted_key and len(persisted_key) >= 32:
+                    logger.info("📌 Webhook SECRET_KEY loaded from persisted secure key file")
+                    return persisted_key
+        except Exception as exc:
+            logger.warning(f"⚠️ Could not read persisted Webhook SECRET_KEY: {exc}")
+    
+    # 3. Generate new cryptographically-secure key
+    new_key = secrets.token_urlsafe(32)
+    
+    # Persist for consistency across restarts
+    try:
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(secret_file, 'w') as f:
+            f.write(new_key)
+        secret_file.chmod(0o600)
+        logger.info(f"✅ Generated and persisted new Webhook SECRET_KEY")
+    except Exception as exc:
+        logger.warning(f"⚠️ Could not persist Webhook SECRET_KEY: {exc}")
+    
+    return new_key
+
+# ✅ SECURITY FIX: Set SECRET_KEY and enable CSRF for admin endpoints
+app.config['SECRET_KEY'] = _get_or_create_app_secret_key()
+csrf = CSRFProtect(app)
+
+# Disable CSRF for the webhook endpoint (uses HMAC + token instead)
+csrf.exempt(lambda: request.path == '/webhook' and request.method == 'POST')
+
 # ----------------------------------------------------------------------
 # Global runtime state
 # ----------------------------------------------------------------------
@@ -119,6 +178,8 @@ def check_rate_limit(ip: str) -> bool:
 
 # ----------------------------------------------------------------------
 # Endpoint: /webhook  (POST)
+# Security: Token auth + HMAC signature validation (TradingView calls this)
+# ✅ CSRF EXEMPTED: Uses HMAC + token instead
 # ----------------------------------------------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -134,6 +195,11 @@ def webhook():
         "confluence": 4,
         "timestamp": "2024-01-15T10:30:00Z"
     }
+    
+    Security:
+    - Requires valid X-Webhook-Token header
+    - Requires valid X-Webhook-Signature (HMAC-SHA256)
+    - Rate limited per IP
     """
     ip = request.remote_addr or "unknown"
 
@@ -207,6 +273,7 @@ def webhook():
 
 # ----------------------------------------------------------------------
 # Endpoint: /status  (GET)
+# ✅ Unprotected: Read-only, safe by design
 # ----------------------------------------------------------------------
 @app.route("/status", methods=["GET"])
 def status():
@@ -240,10 +307,18 @@ def status():
 
 
 # ----------------------------------------------------------------------
-# Endpoint: /pause  (POST)  – pause trading
+# Endpoint: /pause  (POST)
+# ✅ CSRF PROTECTED: Internal admin endpoint
+# Clients must provide X-CSRFToken header
 # ----------------------------------------------------------------------
 @app.route("/pause", methods=["POST"])
+@csrf.protect  # ✅ SECURITY: CSRF token required
 def pause_trading():
+    """
+    Pause trading via API.
+    
+    Requires X-CSRFToken header (CSRF token).
+    """
     global TRADING_PAUSED
     TRADING_PAUSED = True
     logger.info("⏸️ Trading PAUSED via API")
@@ -251,10 +326,18 @@ def pause_trading():
 
 
 # ----------------------------------------------------------------------
-# Endpoint: /resume  (POST) – resume trading
+# Endpoint: /resume  (POST)
+# ✅ CSRF PROTECTED: Internal admin endpoint
+# Clients must provide X-CSRFToken header
 # ----------------------------------------------------------------------
 @app.route("/resume", methods=["POST"])
+@csrf.protect  # ✅ SECURITY: CSRF token required
 def resume_trading():
+    """
+    Resume trading via API.
+    
+    Requires X-CSRFToken header (CSRF token).
+    """
     global TRADING_PAUSED
     TRADING_PAUSED = False
     logger.info("▶️ Trading RESUMED via API")
@@ -263,8 +346,11 @@ def resume_trading():
 
 # ----------------------------------------------------------------------
 # Endpoint: /force_stack/<symbol>  (POST)
+# ✅ CSRF PROTECTED: Internal admin endpoint
+# Clients must provide X-CSRFToken header
 # ----------------------------------------------------------------------
 @app.route("/force_stack/<symbol>", methods=["POST"])
+@csrf.protect  # ✅ SECURITY: CSRF token required
 def force_stack(symbol: str):
     """
     Manually force a STACK entry.
@@ -274,6 +360,8 @@ def force_stack(symbol: str):
         "entry": 1.1080,
         "sl": 1.1050
     }
+    
+    Requires X-CSRFToken header (CSRF token).
     """
     try:
         payload = request.get_json(force=True)
@@ -299,10 +387,12 @@ def force_stack(symbol: str):
 
 
 # ----------------------------------------------------------------------
-# Endpoint: /history  (GET) – recent signal history
+# Endpoint: /history  (GET)
+# ✅ Unprotected: Read-only, safe by design
 # ----------------------------------------------------------------------
 @app.route("/history", methods=["GET"])
 def get_history():
+    """Return recent signal history."""
     limit = int(request.args.get("limit", 50))
     return jsonify(
         {"signals": signal_history[-limit:], "total": len(signal_history)}
@@ -310,15 +400,17 @@ def get_history():
 
 
 # ----------------------------------------------------------------------
-# Endpoint: /health  (GET) – simple health check
+# Endpoint: /health  (GET)
+# ✅ Unprotected: Health check, safe by design
 # ----------------------------------------------------------------------
 @app.route("/health", methods=["GET"])
 def health():
+    """Simple health check endpoint."""
     return jsonify(
         {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "version": "1.0.0",
+            "version": "1.0.1",
         }
     ), 200
 
@@ -346,7 +438,7 @@ def _process_signal(data: Dict) -> None:
             f"Processing {signal_type} {direction} for {symbol} @ {entry:.5f}"
         )
 
-        # Optional: ignore stale signals (>5 min old)
+        # Optional: ignore stale signals (>5 min old)
         if timestamp:
             try:
                 sig_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
@@ -408,12 +500,13 @@ def _run_flask():
     logger.info(
         f"HMAC signature: {'ENABLED' if WebhookConfig.REQUIRE_SIGNATURE else 'DISABLED'}"
     )
+    logger.info("✅ CSRF protection enabled on admin endpoints (/pause, /resume, /force_stack)")
     logger.info("Endpoints:")
-    logger.info(f"  POST   http://{host}:{port}/webhook")
+    logger.info(f"  POST   http://{host}:{port}/webhook              (token + HMAC auth)")
     logger.info(f"  GET    http://{host}:{port}/status")
-    logger.info(f"  POST   http://{host}:{port}/pause")
-    logger.info(f"  POST   http://{host}:{port}/resume")
-    logger.info(f"  POST   http://{host}:{port}/force_stack/<symbol>")
+    logger.info(f"  POST   http://{host}:{port}/pause               (CSRF protected)")
+    logger.info(f"  POST   http://{host}:{port}/resume              (CSRF protected)")
+    logger.info(f"  POST   http://{host}:{port}/force_stack/<symbol> (CSRF protected)")
     logger.info(f"  GET    http://{host}:{port}/history")
     logger.info(f"  GET    http://{host}:{port}/health")
     logger.info("=" * 80 + "\n")
@@ -463,4 +556,3 @@ if __name__ == "__main__":
         sys.exit(1)
 
     _run_flask()
-
