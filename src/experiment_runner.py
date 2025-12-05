@@ -66,7 +66,7 @@ def analyse_and_append():
 
     # Append a row to the CSV
     row = {
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now().isoformat(),
         'experiment': os.getenv('EXPERIMENT'),   # e.g. WITH_LIR
         'control_expectancy': m_ctrl['expectancy'],
         'variant_expectancy': m_exp['expectancy'],
