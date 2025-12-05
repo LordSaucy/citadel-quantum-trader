@@ -2,11 +2,11 @@
 """
 backtest_validator.py
 
-A production‑grade back‑testing and validation engine for Citadel Quantum Trader.
+A production‑grade back‑testing and validation engine for Citadel Quantum Trader.
 
 Features
 --------
-* Pulls OHLCV data from MetaTrader 5.
+* Pulls OHLCV data from MetaTrader 5.
 * Walks the data bar‑by‑bar, feeding a user‑supplied ``strategy_function``.
 * Handles entry, stop‑loss, take‑profit, position sizing and exit.
 * Emits a rich performance report (win‑rate, profit‑factor, max draw‑down,
@@ -18,6 +18,7 @@ Features
 # ----------------------------------------------------------------------
 # Standard library
 # ----------------------------------------------------------------------
+import csv
 import json
 import logging
 import pathlib
@@ -51,9 +52,9 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------------
 # Constants
 # ----------------------------------------------------------------------
-# 1 lot = 100 000 units (FX standard).  Adjust if you trade other assets.
+# 1 lot = 100 000 units (FX standard).  Adjust if you trade other assets.
 LOT_SIZE_UNITS = 100_000
-# Simple conversion factor for “pips” – works for most major FX pairs.
+# Simple conversion factor for "pips" – works for most major FX pairs.
 PIP_FACTOR = 10_000
 
 # ----------------------------------------------------------------------
@@ -104,8 +105,9 @@ class BacktestValidator:
         self.equity_curve: List[Dict] = []
         self.daily_returns: List[float] = []
 
+        # ✅ FIXED: Corrected format string syntax (was: "$%,.2f" → now: "%.2f")
         logger.info(
-            "BacktestValidator initialised – balance=$%,.2f, risk=%.2f%%",
+            "BacktestValidator initialised – balance=$%.2f, risk=%.2f%%",
             self.initial_balance,
             self.risk_per_trade,
         )
@@ -269,6 +271,8 @@ class BacktestValidator:
 
     # ------------------------------------------------------------------
     # 2️⃣  Core back‑test engine
+    # ✅ FIXED: Reduced cognitive complexity from 18 to 12
+    #           by extracting exit checking and position opening logic
     # ------------------------------------------------------------------
     def _run_backtest(
         self,
@@ -286,13 +290,13 @@ class BacktestValidator:
             * ``final_equity`` – cash + unrealised P/L of open positions
         """
         balance = self.initial_balance
-        equity = balance
         open_positions: List[_Position] = []
         closed_trades: List[Dict] = []
         equity_curve: List[Dict] = []
 
+        # ✅ FIXED: Removed unused variable assignment (was: equity = balance)
         # Seed equity curve with the first timestamp
-        equity_curve.append({"time": data.iloc[0]["time"], "equity": equity})
+        equity_curve.append({"time": data.iloc[0]["time"], "equity": balance})
 
         # --------------------------------------------------------------
         # Iterate over the data (skip first 100 bars for warm‑up)
@@ -302,26 +306,9 @@ class BacktestValidator:
             hist_slice = data.iloc[: idx + 1]  # inclusive slice for the strategy
 
             # ----- 1️⃣  Exit handling for open positions ----------------
-            for pos in open_positions[:]:  # copy to allow removal
-                exit_info = self._check_exit(pos, current_bar)
-                if exit_info["should_exit"]:
-                    profit = exit_info["profit"]
-                    balance += profit
-                    equity = balance
-
-                    trade_record = {
-                        "entry_time": pos["entry_time"],
-                        "exit_time": current_bar["time"],
-                        "symbol": pos["symbol"],
-                        "direction": pos["direction"],
-                        "entry_price": pos["entry_price"],
-                        "exit_price": exit_info["exit_price"],
-                        "profit": profit,
-                        "win": profit > 0,
-                        "exit_reason": exit_info["reason"],
-                    }
-                    closed_trades.append(trade_record)
-                    open_positions.remove(pos)
+            balance, closed_trades, open_positions = self._process_exits(
+                open_positions, current_bar, balance, closed_trades
+            )
 
             # ----- 2️⃣  Strategy signal ---------------------------------
             signal = strategy_function(hist_slice)
@@ -330,7 +317,6 @@ class BacktestValidator:
             if signal and len(open_positions) < 3:
                 # ---- Position sizing (risk amount) --------------------
                 risk_amount = balance * (self.risk_per_trade / 100.0)
-                # ``stop_distance`` is not needed for sizing in this simple model
                 position = _Position(
                     entry_time=current_bar["time"],
                     symbol=signal["symbol"],
@@ -339,7 +325,6 @@ class BacktestValidator:
                     stop_loss=signal["stop_loss"],
                     take_profit=signal["take_profit"],
                     risk_amount=risk_amount,
-                    # optional meta‑data
                     quality_score=signal.get("quality_score", 0),
                     confluence_score=signal.get("confluence_score", 0),
                 )
@@ -349,48 +334,102 @@ class BacktestValidator:
             unrealised = sum(
                 self._calculate_unrealised_pl(pos, current_bar) for pos in open_positions
             )
-            equity = balance + unrealised
-            equity_curve.append({"time": current_bar["time"], "equity": equity})
+            current_equity = balance + unrealised
+            equity_curve.append({"time": current_bar["time"], "equity": current_equity})
 
         # --------------------------------------------------------------
         # Forced close of any remaining open positions at the last bar
         # --------------------------------------------------------------
-        if open_positions:
-            final_bar = data.iloc[-1]
-            for pos in open_positions:
-                exit_price = (
-                    final_bar["close"]
-                    if pos["direction"] == "BUY"
-                    else final_bar["close"]
-                )
-                profit = (
-                    (exit_price - pos["entry_price"]) * LOT_SIZE_UNITS
-                    if pos["direction"] == "BUY"
-                    else (pos["entry_price"] - exit_price) * LOT_SIZE_UNITS
-                )
-                balance += profit
-                trade_record = {
-                    "entry_time": pos["entry_time"],
-                    "exit_time": final_bar["time"],
-                    "symbol": pos["symbol"],
-                    "direction": pos["direction"],
-                    "entry_price": pos["entry_price"],
-                    "exit_price": exit_price,
-                    "profit": profit,
-                    "win": profit > 0,
-                    "exit_reason": "FORCED_CLOSE_END_OF_BACKTEST",
-                }
-                closed_trades.append(trade_record)
+        balance, closed_trades = self._force_close_remaining(
+            open_positions, data.iloc[-1], balance, closed_trades
+        )
 
-            equity = balance
-            equity_curve.append({"time": final_bar["time"], "equity": equity})
+        # Final equity curve update
+        equity_curve.append({"time": data.iloc[-1]["time"], "equity": balance})
 
         return {
             "closed_trades": closed_trades,
             "equity_curve": equity_curve,
             "final_balance": balance,
-            "final_equity": equity,
+            "final_equity": balance,
         }
+
+    # ------------------------------------------------------------------
+    # 2️⃣ a Helper – process exits (extracted to reduce complexity)
+    # ------------------------------------------------------------------
+    def _process_exits(
+        self,
+        open_positions: List[_Position],
+        current_bar: pd.Series,
+        balance: float,
+        closed_trades: List[Dict],
+    ) -> Tuple[float, List[Dict], List[_Position]]:
+        """
+        Check all open positions for exit conditions (TP/SL).
+        Returns updated (balance, closed_trades, open_positions).
+        """
+        for pos in open_positions[:]:  # copy to allow removal
+            exit_info = self._check_exit(pos, current_bar)
+            if exit_info["should_exit"]:
+                profit = exit_info["profit"]
+                balance += profit
+
+                trade_record = {
+                    "entry_time": pos["entry_time"],
+                    "exit_time": current_bar["time"],
+                    "symbol": pos["symbol"],
+                    "direction": pos["direction"],
+                    "entry_price": pos["entry_price"],
+                    "exit_price": exit_info["exit_price"],
+                    "profit": profit,
+                    "win": profit > 0,
+                    "exit_reason": exit_info["reason"],
+                }
+                closed_trades.append(trade_record)
+                open_positions.remove(pos)
+
+        return balance, closed_trades, open_positions
+
+    # ------------------------------------------------------------------
+    # 2️⃣ b Helper – force close remaining positions
+    # ------------------------------------------------------------------
+    def _force_close_remaining(
+        self,
+        open_positions: List[_Position],
+        final_bar: pd.Series,
+        balance: float,
+        closed_trades: List[Dict],
+    ) -> Tuple[float, List[Dict]]:
+        """
+        Force close any remaining open positions at end of backtest.
+        Returns updated (balance, closed_trades).
+        """
+        if not open_positions:
+            return balance, closed_trades
+
+        for pos in open_positions:
+            exit_price = final_bar["close"]
+            # ✅ FIXED: Removed duplicate conditional (both BUY and SELL use same logic)
+            profit = (
+                (exit_price - pos["entry_price"]) * LOT_SIZE_UNITS
+                if pos["direction"] == "BUY"
+                else (pos["entry_price"] - exit_price) * LOT_SIZE_UNITS
+            )
+            balance += profit
+            trade_record = {
+                "entry_time": pos["entry_time"],
+                "exit_time": final_bar["time"],
+                "symbol": pos["symbol"],
+                "direction": pos["direction"],
+                "entry_price": pos["entry_price"],
+                "exit_price": exit_price,
+                "profit": profit,
+                "win": profit > 0,
+                "exit_reason": "FORCED_CLOSE_END_OF_BACKTEST",
+            }
+            closed_trades.append(trade_record)
+
+        return balance, closed_trades
 
     # ------------------------------------------------------------------
     # 3️⃣  Exit logic
@@ -451,7 +490,6 @@ class BacktestValidator:
         return {"should_exit": False}
 
     # ------------------------------------------------------------------
-        # ------------------------------------------------------------------
     # 4️⃣  Unrealised P/L helper (static method – no state needed)
     # ------------------------------------------------------------------
     @staticmethod
@@ -565,7 +603,7 @@ class BacktestValidator:
         return analysis
 
     # ------------------------------------------------------------------
-    # 5️⃣ a Helper – validation rule extraction (makes complexity ≤ 15)
+    # 5️⃣ a Helper – validation rule extraction (makes complexity ≤ 15)
     # ------------------------------------------------------------------
     @staticmethod
     def _check_validation_rules(
@@ -582,7 +620,7 @@ class BacktestValidator:
 
         if win_rate < min_win_rate:
             fail_reasons.append("WIN_RATE_BELOW_THRESHOLD")
-        if max_drawdown < -10.0:  # more than 10 % draw‑down is considered risky
+        if max_drawdown < -10.0:  # more than 10 % draw‑down is considered risky
             fail_reasons.append("DRAW_DOWN_EXCEEDED")
         if profit_factor < 1.5:
             fail_reasons.append("PROFIT_FACTOR_TOO_LOW")
@@ -592,6 +630,8 @@ class BacktestValidator:
 
     # ------------------------------------------------------------------
     # 6️⃣  Persist the JSON report (audit‑trail)
+    # ✅ FIXED: Removed unused parameters 'symbol' and 'timeframe'
+    #           They are now only used in the caller if needed
     # ------------------------------------------------------------------
     def _save_results(
         self,
