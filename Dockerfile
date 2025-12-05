@@ -1,6 +1,6 @@
 # ------------------------------------------------------------
 # 1️⃣  Builder stage – compile / install everything we need
-# ------------------------------------------------------------
+# ------------------------------------------------------------ 
 FROM python:3.12-slim AS builder
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
