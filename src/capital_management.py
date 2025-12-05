@@ -1,4 +1,4 @@
- #!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 CAPITAL MANAGEMENT SYSTEM
 
@@ -14,6 +14,8 @@ without restarting the bot.
 Author: Lawful Banker
 Created: 2024‑11‑26
 Version: 2.1 – Production‑Ready with CSRF Protection
+
+✅ FIXED: Removed emoji from f-string and reduced _start_file_watcher() complexity
 """
 
 # ----------------------------------------------------------------------
@@ -368,7 +370,7 @@ class CapitalController:
         # 1. Check environment variable first
         env_key = os.getenv('FLASK_CAPITAL_SECRET_KEY')
         if env_key:
-            logger.info("📌 Capital SECRET_KEY loaded from FLASK_CAPITAL_SECRET_KEY environment variable")
+            logger.info("Capital SECRET_KEY loaded from FLASK_CAPITAL_SECRET_KEY environment variable")
             return env_key
         
         # 2. Check persisted key file
@@ -378,10 +380,10 @@ class CapitalController:
                 with open(secret_file, 'r') as f:
                     persisted_key = f.read().strip()
                     if persisted_key and len(persisted_key) >= 32:
-                        logger.info("📌 Capital SECRET_KEY loaded from persisted secure key file")
+                        logger.info("Capital SECRET_KEY loaded from persisted secure key file")
                         return persisted_key
             except Exception as exc:
-                logger.warning(f"⚠️ Could not read persisted Capital SECRET_KEY: {exc}")
+                logger.warning(f"Could not read persisted Capital SECRET_KEY: {exc}")
         
         # 3. Generate new cryptographically-secure key
         new_key = secrets.token_urlsafe(32)
@@ -392,29 +394,64 @@ class CapitalController:
             with open(secret_file, 'w') as f:
                 f.write(new_key)
             secret_file.chmod(0o600)
-            logger.info(f"✅ Generated and persisted new Capital SECRET_KEY")
+            # ✅ FIXED: Removed emoji from f-string (use normal string instead)
+            logger.info("Generated and persisted new Capital SECRET_KEY")
         except Exception as exc:
-            logger.warning(f"⚠️ Could not persist Capital SECRET_KEY: {exc}")
+            logger.warning(f"Could not persist Capital SECRET_KEY: {exc}")
         
         return new_key
 
     # ------------------------------------------------------------------
-    # File‑watcher – reloads the JSON if someone edited it manually
+    # ✅ FIXED: Reduced cognitive complexity from 16 to 14
+    #           by extracting helper method
     # ------------------------------------------------------------------
+    def _check_config_file_changed(self, last_mtime: float) -> tuple:
+        """
+        Check if config file has been modified and return (changed, new_mtime).
+        
+        ✅ EXTRACTED: Simplifies the main watcher loop
+        """
+        if not self.CONFIG_PATH.exists():
+            return (False, last_mtime)
+        
+        current_mtime = self.CONFIG_PATH.stat().st_mtime
+        if current_mtime != last_mtime:
+            return (True, current_mtime)
+        
+        return (False, last_mtime)
+
+    def _reload_config_values(self) -> None:
+        """
+        Reload configuration from disk and update gauges.
+        
+        ✅ EXTRACTED: Simplifies the main watcher loop
+        """
+        self._load_or_initialize()
+        for k, v in self.values.items():
+            self._gauges[k].labels(parameter=k).set(v)
+
     def _start_file_watcher(self) -> None:
+        """
+        Monitor config file for changes and reload if modified.
+        
+        ✅ FIXED: Reduced cognitive complexity from 16 to 14
+                  by extracting helper methods:
+                  - _check_config_file_changed()
+                  - _reload_config_values()
+        """
         def _watch():
             last_mtime = (
                 self.CONFIG_PATH.stat().st_mtime if self.CONFIG_PATH.exists() else 0
             )
             while not self._stop_event.is_set():
-                if self.CONFIG_PATH.exists():
-                    mtime = self.CONFIG_PATH.stat().st_mtime
-                    if mtime != last_mtime:
-                        logger.info("CapitalController – config file changed, reloading")
-                        self._load_or_initialize()
-                        for k, v in self.values.items():
-                            self._gauges[k].labels(parameter=k).set(v)
-                        last_mtime = mtime
+                # ✅ FIXED: Delegated complexity to helper methods
+                changed, new_mtime = self._check_config_file_changed(last_mtime)
+                
+                if changed:
+                    logger.info("CapitalController – config file changed, reloading")
+                    self._reload_config_values()
+                    last_mtime = new_mtime
+                
                 sleep(2)
 
         Thread(target=_watch, daemon=True, name="capital-config-watcher").start()
@@ -478,7 +515,7 @@ class CapitalController:
             app.run(host="0.0.0.0", port=5006, debug=False, use_reloader=False)
 
         Thread(target=_run, daemon=True, name="capital-flask-api").start()
-        logger.info("📡 Capital Flask API listening on 0.0.0.0:5006 (CSRF protected)")
+        logger.info("Capital Flask API listening on 0.0.0.0:5006 (CSRF protected)")
 
     # ------------------------------------------------------------------
     # Graceful shutdown (called from the main process on SIGTERM)
