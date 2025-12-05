@@ -23,7 +23,7 @@ def get_close_prices(engine: "sqlalchemy.Engine") -> pd.DataFrame:
     Returns a DataFrame indexed by timestamp with one column per symbol.
     Only the last LOOKBACK_DAYS of data are fetched.
     """
-    end_ts   = datetime.utcnow()
+    end_ts   = datetime.now()
     start_ts = end_ts - timedelta(days=LOOKBACK_DAYS)
 
     sql = text(f"""
