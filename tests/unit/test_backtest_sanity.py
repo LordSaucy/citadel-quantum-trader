@@ -42,7 +42,7 @@ def validator():
 def test_single_bar_returns_none(validator):
     # Build a 1‑minute dataset (only one row)
     single_bar = pd.DataFrame({
-        "time":   [pd.Timestamp(datetime.utcnow())],
+        "time":   [pd.Timestamp(datetime.now())],
         "open":   [1.1000],
         "high":   [1.1010],
         "low":    [1.0990],
@@ -58,8 +58,8 @@ def test_single_bar_returns_none(validator):
     validator._sanity_checks(
         symbol="EURUSD",
         timeframe=5,                     # any MT5 timeframe constant
-        start_date=datetime.utcnow() - timedelta(minutes=1),
-        end_date=datetime.utcnow(),
+        start_date=datetime.now() - timedelta(minutes=1),
+        end_date=datetime.now(),
         strategy_function=dummy_no_signal
     )   # should pass silently (no exception)
 
@@ -73,8 +73,8 @@ def test_strategy_returns_signal_on_first_bar_fails(validator):
         validator._sanity_checks(
             symbol="EURUSD",
             timeframe=5,
-            start_date=datetime.utcnow() - timedelta(minutes=1),
-            end_date=datetime.utcnow(),
+            start_date=datetime.now() - timedelta(minutes=1),
+            end_date=datetime.now(),
             strategy_function=dummy_bad_signal
         )
 
@@ -90,7 +90,7 @@ def test_run_validation_fails_on_bad_strategy(validator):
     # so the method can continue far enough to hit our sanity‑check result.
     def fake_fetch(*_args, **_kwargs):
         # Return two bars – enough for the engine to iterate
-        now = datetime.utcnow()
+        now = datetime.now()
         return pd.DataFrame({
             "time":   [now - timedelta(minutes=1), now],
             "open":   [1.1000, 1.1005],
@@ -105,8 +105,8 @@ def test_run_validation_fails_on_bad_strategy(validator):
     result = validator.run_validation(
         symbol="EURUSD",
         timeframe=5,
-        start_date=datetime.utcnow() - timedelta(days=1),
-        end_date=datetime.utcnow(),
+        start_date=datetime.now() - timedelta(days=1),
+        end_date=datetime.now(),
         strategy_function=dummy_bad_signal,   # this will fail the sanity check
         min_win_rate=0.0                     # we don't care about win‑rate here
     )
