@@ -275,7 +275,7 @@ class CalendarDataReader:
         base_cur = symbol[:3].upper()
         quote_cur = symbol[3:6].upper()
 
-        now = datetime.utcnow(timezone.utc)
+        age = datetime.utcnow(timezone.utc)- datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)).total_seconds()
         for ev in data.get("events", []):
             # Skip inactive events
             if not ev.get("is_active"):
