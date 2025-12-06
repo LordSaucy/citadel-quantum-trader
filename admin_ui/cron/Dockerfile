@@ -1,20 +1,41 @@
-# ==========================
-# admin_ui/cron/Dockerfile
-# ==========================
+# -----------------------------------------------------------------
+#  admin_ui/cron/Dockerfile
+# -----------------------------------------------------------------
 FROM alpine:3.20
 
-# Install cron + any utilities you need (bash, curl, etc.)
-RUN apk add --no-cache bash curl tzdata && \
-    cp /usr/share/zoneinfo/UTC /etc/localtime && \
-    echo "UTC" > /etc/timezone
+# ---- Install runtime dependencies (example) --------------------
+# (Add only the packages you really need – keep the image small)
+RUN apk add --no-cache \
+        python3~=3.12 \
+        py3-pip \
+        bash \
+        tzdata && \
+    # Clean up any apk cache (already done by --no-cache)
 
-# Copy your cron scripts (e.g. the daily fetch, backup, etc.)
-COPY scripts/ /opt/cqt/scripts/
-COPY cronjob /etc/cron.d/cqt-cron
+# ---- Create a non‑root user ------------------------------------
+# uid/gid 1000 is the conventional “regular user” ID on many systems.
+# You can change these numbers if your organization reserves a different range.
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+ARG USER_NAME=cqtcron
 
-# Give the cron file proper permissions and install it
-RUN chmod 0644 /etc/cron.d/cqt-cron && \
-    crontab /etc/cron.d/cqt-cron
+RUN addgroup -g ${GROUP_ID} ${USER_NAME} && \
+    adduser -D -u ${USER_ID} -G ${USER_NAME} -s /bin/sh ${USER_NAME}
 
-# Run cron in foreground
-CMD ["crond", "-f"]
+# ---- Copy application code ---------------------------------------
+WORKDIR /app
+COPY . /app
+
+# ---- Adjust ownership of copied files ---------------------------
+# (Ensures the non‑root user can read/write where needed)
+RUN chown -R ${USER_NAME}:${USER_NAME} /app
+
+# ---- Switch to the non‑root user -------------------------------
+USER ${USER_NAME}
+
+# ---- Set a sane PATH (optional) --------------------------------
+ENV PATH="/home/${USER_NAME}/.local/bin:${PATH}"
+
+# ---- Entrypoint / command ---------------------------------------
+# Replace with whatever you normally run (e.g. a cron wrapper script)
+CMD ["python3", "run_cron_jobs.py"]
