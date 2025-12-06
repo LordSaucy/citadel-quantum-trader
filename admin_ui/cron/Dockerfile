@@ -4,7 +4,7 @@
 FROM alpine:3.20
 
 # ---- Install runtime dependencies (example) --------------------
-# (Add only the packages you really need – keep the image small)
+# (Add only the packages you really need – keep the image small) 
 RUN apk add --no-cache \
         python3~=3.12 \
         py3-pip \
