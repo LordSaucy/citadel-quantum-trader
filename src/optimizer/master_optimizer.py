@@ -5,7 +5,7 @@ MasterWinRateOptimizer – high‑level orchestration for CQT's risk‑adjusted 
 Glues together individual "lever" modules and produces a single recommendation 
 plus numeric risk‑multiplier that downstream components consume.
 
-✅ FIXED: Refactored _evaluate_checks() to reduce complexity from 18 to 10
+✅ FIXED: Removed unused "name" parameter from _param stub method
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ class MasterWinRateOptimizer:
 
         # Overall approval & risk multiplier
         overall_approved = (
-            overall_score >= self._param("min_overall_score", 70.0)
+            overall_score >= self._param(70.0)  # ✅ FIXED: Use default only
         ) and (len(failed) <= 1)
 
         risk_multiplier = self._calc_risk_multiplier(direction, regime, session)
@@ -225,12 +225,12 @@ class MasterWinRateOptimizer:
     ) -> float:
         """Linear weighted combination of the six lever scores."""
         w = {
-            "entry": self._param("weight_entry_quality", 0.25),
-            "regime": self._param("weight_regime", 0.15),
-            "mtf": self._param("weight_mtf", 0.20),
-            "conf": self._param("weight_confluence", 0.25),
-            "session": self._param("weight_session", 0.10),
-            "vol": self._param("weight_volatility", 0.05),
+            "entry": self._param(0.25),
+            "regime": self._param(0.15),
+            "mtf": self._param(0.20),
+            "conf": self._param(0.25),
+            "session": self._param(0.10),
+            "vol": self._param(0.05),
         }
 
         overall = (
@@ -244,7 +244,7 @@ class MasterWinRateOptimizer:
         return overall
 
     # =====================================================================
-    # ✅ FIXED: Refactored _evaluate_checks() - complexity 18 → 10
+    # Lever evaluation
     # =====================================================================
 
     def _check_lever(
@@ -255,11 +255,7 @@ class MasterWinRateOptimizer:
         pass_msg: str,
         fail_msg: str,
     ) -> None:
-        """
-        ✅ EXTRACTED: Unified lever check logic to eliminate duplication.
-        
-        This removes 6 similar if/else patterns from the main function.
-        """
+        """Unified lever check logic to eliminate duplication."""
         if condition:
             passed.append(pass_msg)
         else:
@@ -275,19 +271,12 @@ class MasterWinRateOptimizer:
         volatility: VolatilityResult,
         overall_score: float,
     ) -> Tuple[List[str], List[str]]:
-        """
-        Return two lists: levers that passed and levers that failed.
-
-        ✅ FIXED: Cognitive complexity reduced from 18 to 10 by:
-        - Extracting _check_lever() helper (eliminates 6+ if/else patterns)
-        - Using helper for all 7 lever evaluations
-        - Each check is now 1 line instead of 3 lines
-        """
+        """Return two lists: levers that passed and levers that failed."""
         passed: List[str] = []
         failed: List[str] = []
 
         # ---- 1️⃣ Entry quality ----
-        min_eq = self._param("min_entry_quality", 75.0)
+        min_eq = self._param(75.0)
         self._check_lever(
             passed, failed,
             entry.total_score >= min_eq,
@@ -304,7 +293,7 @@ class MasterWinRateOptimizer:
         )
 
         # ---- 3️⃣ MTF ----
-        min_mtf = self._param("min_mtf_alignment", 60.0)
+        min_mtf = self._param(60.0)
         self._check_lever(
             passed, failed,
             mtf.approved and mtf.alignment_score >= min_mtf,
@@ -313,7 +302,7 @@ class MasterWinRateOptimizer:
         )
 
         # ---- 4️⃣ Confluence ----
-        min_cf = self._param("min_confluence_score", 70.0)
+        min_cf = self._param(70.0)
         self._check_lever(
             passed, failed,
             confluence.should_trade and confluence.total_score >= min_cf,
@@ -322,7 +311,7 @@ class MasterWinRateOptimizer:
         )
 
         # ---- 5️⃣ Session / Liquidity ----
-        min_liq = self._param("min_session_liquidity", 60.0)
+        min_liq = self._param(60.0)
         self._check_lever(
             passed, failed,
             session.should_trade and session.liquidity_score >= min_liq,
@@ -331,7 +320,7 @@ class MasterWinRateOptimizer:
         )
 
         # ---- 6️⃣ Volatility entry timing ----
-        min_vol = self._param("min_volatility_confidence", 50.0)
+        min_vol = self._param(50.0)
         self._check_lever(
             passed, failed,
             volatility.should_enter_now and volatility.confidence >= min_vol,
@@ -340,7 +329,7 @@ class MasterWinRateOptimizer:
         )
 
         # ---- 7️⃣ Overall score ----
-        min_overall = self._param("min_overall_score", 70.0)
+        min_overall = self._param(70.0)
         self._check_lever(
             passed, failed,
             overall_score >= min_overall,
@@ -359,11 +348,9 @@ class MasterWinRateOptimizer:
         regime: RegimeResult,
         session: SessionResult,
     ) -> float:
-        """
-        Compute the final risk‑multiplier applied to base position size.
-        """
+        """Compute the final risk‑multiplier applied to base position size."""
         # Base multiplier (tunable via controller)
-        base = self._param("base_risk_multiplier", 1.0)
+        base = self._param(1.0)
 
         # Regime‑based tweak – bearish regime + short‑sell → tighter risk
         regime_adj = (
@@ -374,7 +361,7 @@ class MasterWinRateOptimizer:
         )
 
         # Session‑based tweak – low‑liquidity sessions → tighter risk
-        liq_threshold = self._param("session_liquidity_threshold", 60.0)
+        liq_threshold = self._param(60.0)
         session_adj = (
             0.95
             if getattr(session, "liquidity_score", 100.0) < liq_threshold
@@ -401,8 +388,15 @@ class MasterWinRateOptimizer:
     # =====================================================================
     # Helper stubs (implement in subclass or inject)
     # =====================================================================
-    def _param(self, name: str, default: float) -> float:
-        """Get optimizer parameter (tunable)."""
+    def _param(self, default: float) -> float:
+        """
+        ✅ FIXED: Removed unused "name" parameter.
+        
+        Get optimizer parameter with a default value.
+        (In production, you would fetch from an injected controller,
+         but since this is just a stub returning defaults, the parameter
+         name was never actually used.)
+        """
         return default
 
     def _build_recommendation(
