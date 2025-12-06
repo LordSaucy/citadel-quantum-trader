@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
 VolEntry.py – Production‑ready volatility‑entry refinement system.
-
-✅ FIXED: Removed unused local variable `rates_m15` from analyze_entry_timing()
-The method only uses rates_h1 for all calculations; rates_m15 was never referenced.
 """
 
 import json
@@ -224,11 +221,6 @@ class VolatilityEntryRefinement:
     def __init__(self) -> None:
         logger.info("Volatility Entry Refinement initialised")
 
-    # =====================================================================
-    # ✅ FIXED: Removed unused `rates_m15` variable
-    # Before: rates_m15 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 400)
-    # After:  Removed – only rates_h1 is used throughout the method
-    # =====================================================================
     def analyze_entry_timing(
         self,
         symbol: str,
@@ -236,7 +228,7 @@ class VolatilityEntryRefinement:
         proposed_entry: float,
     ) -> VolatilityEntry:
         """Analyse entry timing based on volatility."""
-        # ✅ FIXED: Load only rates_h1 (rates_m15 was never used)
+    
         rates_h1 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 200)
 
         if rates_h1 is None or len(rates_h1) < 20:
