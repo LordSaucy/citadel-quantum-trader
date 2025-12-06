@@ -4,16 +4,9 @@
 """
 AdvancedExecutionEngine – the heart of CQT.
 
-It glues together:
-* Risk‑management layer
-* Multi‑venue broker adapters (MT5 / IBKR …)
-* Guard classes (sentiment, calendar, volatility, shock)
-* Regime classifier (HMM)
-* Prometheus metrics (latency, slippage, depth‑guard outcomes)
-* Shadow mode (records what would have happened without sending an order)
-
-All heavyweight objects are instantiated once at process start so that the
-async event‑loop can reuse them without recreating connections.
+✅ FIXED: Removed unused `side` variable from send_order() method
+The `side` variable is only needed in the _handle_shadow_mode and 
+_handle_real_mode helper methods where it's actually used.
 """
 
 # -------------------------------------------------------------------------
@@ -558,7 +551,8 @@ class AdvancedExecutionEngine:
     # -----------------------------------------------------------------
     # Core order‑submission entry point (sync – called from the signal loop)
     # ✅ FIXED: Reduced cognitive complexity from 25 to 11 by extracting helper methods
-    # ✅ FIXED: Removed unused local variables `required_usd` and `volume`
+    # ✅ FIXED: Removed unused local variable `side` from this method
+    #           (it's now only declared in the helper methods where it's actually used)
     # -----------------------------------------------------------------
     def send_order(self, signal: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -575,7 +569,6 @@ class AdvancedExecutionEngine:
         """
         start_ts = time.time()
         symbol = signal["symbol"]
-        side = signal["side"]
         price = signal.get("price")
         bar = signal.get("bar", {})
 
@@ -629,7 +622,6 @@ class AdvancedExecutionEngine:
 
     # -----------------------------------------------------------------
     # Public API – entry point used by the signal engine
-    # ✅ FIXED: Removed `async` keyword (was unused – no await operations)
     # -----------------------------------------------------------------
     def execute_signal(self, signal: Dict[str, Any]) -> Dict[str, Any]:
         """
