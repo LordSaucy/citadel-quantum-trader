@@ -3,23 +3,15 @@
 LSTM Regime Forecasting Module
 
 Implements a production‑ready LSTM that predicts the probability that the
-market is in a "bullish" regime (value ∈ [0, 1]).  The model is trained on a
-sliding window of historical features (price returns, volatility, macro
-indicators) and can be re‑trained offline or on‑line.
+market is in a “bullish” regime (value ∈ [0, 1]).  The model is trained on a
+sliding window of historical features (price returns, volatility,
+macro indicators) and can be re‑trained offline or on‑line.
 
 ✅ FIXED:
-- Set model in eval mode after load_state_dict
-- Ensure eval mode in predict() method before inference
-- Ensure eval mode in train() validation loop
-- Replace unsafe torch.load() with safe weight-only loading in save() method
-
-Typical usage:
-
->>> from src.lstm_regime import LSTMRegimeModel, RegimeModelError
->>> model = LSTMRegimeModel(cfg_path="config/regime.yaml")
->>> model.train(train_df, val_df)          # pandas DataFrames
->>> probs = model.predict(test_df)         # returns pd.Series
->>> model.save("models/lstm_regime.pt")   # persist the best checkpoint
+- Model set to ``eval`` mode after loading.
+- Safe weight‑only loading for checkpoints.
+- Explicit ``return`` statements in public API methods.
+- Validation of checkpoint structure before use.
 """
 
 # =====================================================================
@@ -43,6 +35,7 @@ import torch.optim as optim
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
 
+# Optional TensorBoard support (graceful fallback)
 try:  # pragma: no cover
     from torch.utils.tensorboard import SummaryWriter
 except Exception:  # pragma: no cover
@@ -84,7 +77,9 @@ def seed_everything(seed: int = 42) -> None:
 # =====================================================================
 # LSTM Network
 # =====================================================================
-class _LSTMNet(nn.Module):
+class LSTMNet(nn.Module):
+    """Plain LSTM → linear head."""
+
     def __init__(
         self,
         input_dim: int,
@@ -104,19 +99,16 @@ class _LSTMNet(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         lstm_out, _ = self.lstm(x)
-        last_step = lstm_out[:, -1, :]
+        last_step = lstm_out[:, -1, :]          # (batch, hidden)
         logits = self.fc(last_step)
-        return logits.squeeze(-1)
+        return logits.squeeze(-1)               # (batch,)
 
 
 # =====================================================================
 # Sliding‑window Dataset wrapper
 # =====================================================================
 class _WindowDataset(Dataset):
-    """
-    Turns a 2‑D array (samples × features) into a sliding‑window dataset
-    suitable for LSTM training.
-    """
+    """Turns a 2‑D array (samples × features) into a sliding‑window dataset."""
 
     def __init__(
         self,
@@ -125,7 +117,7 @@ class _WindowDataset(Dataset):
         target: Optional[np.ndarray] = None,
     ) -> None:
         if data.ndim != 2:
-            raise ValueError("`data` must be a 2‑D array (samples × features)")
+            raise ValueError("`data` must be a 2‑D array (samples × features)")
         if target is not None and len(target) != len(data):
             raise ValueError("`target` length must match `data` length")
 
@@ -136,7 +128,7 @@ class _WindowDataset(Dataset):
         self.n_windows = len(data) - window + 1
         if self.n_windows <= 0:
             raise ValueError(
-                f"Window size {window} is larger than the dataset ({len(data)} samples)"
+                f"Window size {window} larger than dataset ({len(data)} samples)"
             )
 
     def __len__(self) -> int:
@@ -162,19 +154,17 @@ class _WindowDataset(Dataset):
 @dataclass
 class LSTMRegimeModel:
     """
-    High‑level wrapper around the LSTM network that provides:
+    High‑level wrapper around the LSTM network providing:
 
     * Config‑driven hyper‑parameters
     * Training with early‑stopping & checkpointing
-    * Batch inference returning a Pandas ``Series`` of probabilities
+    * Batch inference returning a ``pd.Series`` of probabilities
     * Model saving / loading (torch ``.pt`` files)
     * Optional TensorBoard logging
-    
-    ✅ FIXED: Safe checkpoint loading (weight-only where applicable)
     """
 
     # ------------------------------------------------------------------
-    # Public configuration
+    # Public configuration (merged with defaults in ``__post_init__``)
     # ------------------------------------------------------------------
     cfg: Mapping[str, Any] = field(default_factory=dict)
 
@@ -183,7 +173,7 @@ class LSTMRegimeModel:
     # ------------------------------------------------------------------
     device: torch.device = field(init=False)
     scaler: StandardScaler = field(init=False)
-    model: _LSTMNet = field(init=False)
+    model: LSTMNet = field(init=False)
     optimizer: optim.Optimizer = field(init=False)
     best_checkpoint_path: Optional[pathlib.Path] = field(default=None, init=False)
     tb_writer: Optional[SummaryWriter] = field(default=None, init=False)
@@ -210,6 +200,7 @@ class LSTMRegimeModel:
         }
     )
 
+    # ------------------------------------------------------------------
     def __post_init__(self) -> None:
         """Merge user config with defaults, set seeds, device, and logging."""
         merged = dict(self.DEFAULT_CFG)
@@ -221,9 +212,11 @@ class LSTMRegimeModel:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         LOGGER.info(f"LSTMRegimeModel initialised on device: {self.device}")
 
+        # Ensure checkpoint directory exists
         ckpt_dir = pathlib.Path(self.cfg["checkpoint_dir"])
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
+        # TensorBoard (optional)
         if self.cfg.get("use_tensorboard", False) and SummaryWriter is not None:
             tb_dir = pathlib.Path(self.cfg["tensorboard_logdir"])
             tb_dir.mkdir(parents=True, exist_ok=True)
@@ -235,7 +228,7 @@ class LSTMRegimeModel:
     # ------------------------------------------------------------------
     def _build_model(self, input_dim: int) -> None:
         """Instantiate the LSTM network."""
-        self.model = _LSTMNet(
+        self.model = LSTMNet(
             input_dim=input_dim,
             hidden_dim=int(self.cfg["hidden_dim"]),
             num_layers=int(self.cfg["num_layers"]),
@@ -252,7 +245,7 @@ class LSTMRegimeModel:
         target_col: str,
         fit_scaler: bool = True,
     ) -> Tuple[_WindowDataset, _WindowDataset, StandardScaler]:
-        """Scale features, split temporally, and return train/val WindowDatasets."""
+        """Scale features, split temporally, and return train/val datasets."""
         if target_col not in df.columns:
             raise RegimeModelError(f"Target column `{target_col}` not found")
 
@@ -310,16 +303,12 @@ class LSTMRegimeModel:
 
         Parameters
         ----------
-        train_df : pd.DataFrame
-            Training data – must contain ``target_col``.
-        val_df : pd.DataFrame
-            Validation data – same columns as ``train_df``.
+        train_df, val_df : pd.DataFrame
+            Must contain ``target_col``.
         target_col : str, optional
-            Column name holding the binary regime label (0 = bear, 1 = bull).
+            Column holding the binary regime label (0 = bear, 1 = bull).
         """
-        # ------------------------------------------------------------------
-        # 1️⃣  Data preparation (fit scaler on training set only)
-        # ------------------------------------------------------------------
+        # -------- 1️⃣ Data preparation (fit scaler on training set only) --------
         full_df = pd.concat([train_df, val_df], ignore_index=True)
         train_ds, val_ds, self.scaler = self._prepare_data(
             full_df, target_col=target_col, fit_scaler=True
@@ -328,9 +317,7 @@ class LSTMRegimeModel:
         input_dim = sample_input.shape[-1]
         self._build_model(input_dim)
 
-        # ------------------------------------------------------------------
-        # 2️⃣  DataLoaders
-        # ------------------------------------------------------------------
+        # -------- 2️⃣ DataLoaders --------
         batch_sz = int(self.cfg["batch_size"])
         train_loader = DataLoader(
             train_ds,
@@ -347,9 +334,7 @@ class LSTMRegimeModel:
             num_workers=os.cpu_count() or 0,
         )
 
-        # ------------------------------------------------------------------
-        # 3️⃣  Optimiser & loss
-        # ------------------------------------------------------------------
+        # -------- 3️⃣ Optimiser & loss --------
         self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=float(self.cfg["lr"]),
@@ -357,9 +342,7 @@ class LSTMRegimeModel:
         )
         criterion = nn.BCEWithLogitsLoss()
 
-        # ------------------------------------------------------------------
-        # 4️⃣  Training loop with early‑stopping
-        # ------------------------------------------------------------------
+        # -------- 4️⃣ Training loop with early‑stopping --------
         best_val_loss = float("inf")
         epochs_no_improve = 0
         max_epochs = int(self.cfg["max_epochs"])
@@ -385,7 +368,6 @@ class LSTMRegimeModel:
                 loss.backward()
                 self.optimizer.step()
                 train_losses.append(loss.item())
-
             train_loss = np.mean(train_losses)
 
             # ----- validation -----
@@ -398,7 +380,6 @@ class LSTMRegimeModel:
                     logits = self.model(xb)
                     loss = criterion(logits, yb)
                     val_losses.append(loss.item())
-
             val_loss = np.mean(val_losses)
 
             # ----- logging -----
@@ -423,8 +404,8 @@ class LSTMRegimeModel:
 
             if epochs_no_improve >= patience:
                 LOGGER.info(
-                    f"Early stopping triggered after {epoch} epochs – "
-                    f"validation loss did not improve by {min_delta} for {patience} consecutive epochs."
+                    f"Early stopping after {epoch} epochs – validation loss did not improve "
+                    f"by {min_delta} for {patience} consecutive epochs."
                 )
                 break
 
@@ -435,6 +416,7 @@ class LSTMRegimeModel:
         if self.tb_writer:
             self.tb_writer.flush()
             self.tb_writer.close()
+        return None  # explicit return for SonarQube
 
     # ------------------------------------------------------------------
     # Inference
@@ -473,172 +455,189 @@ class LSTMRegimeModel:
                 "Feature scaler is missing. Ensure the model was trained or loaded correctly."
             )
 
-        # ----- 1️⃣  Scale input -----
+        # ----- 1️⃣ Scale input -----
         x_raw = df.values.astype(np.float32)
         x_scaled = self.scaler.transform(x_raw)
 
-        # ----- 2️⃣  Build sliding‑window dataset (no targets) -----
+        # ----- 2️⃣ Build sliding‑window dataset (no targets) -----
         window = int(self.cfg["window"])
-        infer_ds = _WindowDataset(x_scaled, window, target=None)
+        infer_ds = _WindowDataset(x_scaled, window
 
-        # ----- 3️⃣  DataLoader for batched inference -----
-        bs = batch_size or int(self.cfg["batch_size"])
-        loader = DataLoader(
-            infer_ds,
-            batch_size=bs,
-            shuffle=False,
-            drop_last=False,
-            num_workers=os.cpu_count() or 0,
+            # ----- 3️⃣  DataLoader for batched inference -----
+    bs = batch_size or int(self.cfg["batch_size"])
+    loader = DataLoader(
+        infer_ds,
+        batch_size=bs,
+        shuffle=False,
+        drop_last=False,
+        num_workers=os.cpu_count() or 0,
+    )
+
+    # ----- 4️⃣  Model forward pass (no gradient) -----
+    self.model.eval()                     # ensure we are in inference mode
+    all_outputs: list = []
+    sigmoid = nn.Sigmoid()
+
+    with torch.no_grad():
+        for xb, _ in loader:
+            xb = xb.to(self.device)
+            logits = self.model(xb)
+            if return_proba:
+                probs = sigmoid(logits).cpu().numpy()
+            else:
+                probs = logits.cpu().numpy()
+            all_outputs.extend(probs.tolist())
+
+    # ----- 5️⃣  Align predictions with the original DataFrame index -----
+    # The first (window‑1) rows have no prediction because we need a full
+    # window to produce an output.
+    padding = [np.nan] * (window - 1)
+    aligned = padding + all_outputs
+
+    if len(aligned) != len(df):
+        raise RegimeModelError(
+            f"Prediction length mismatch: expected {len(df)} values, got {len(aligned)}"
         )
 
-        # ----- 4️⃣  Model forward pass (no gradient) -----
-        self.model.eval()
-        all_outputs: list = []
-        sigmoid = nn.Sigmoid()
+    return pd.Series(aligned, index=df.index, name="regime_probability")
 
-        with torch.no_grad():
-            for xb, _ in loader:
-                xb = xb.to(self.device)
-                logits = self.model(xb)
-                if return_proba:
-                    probs = sigmoid(logits).cpu().numpy()
-                else:
-                    probs = logits.cpu().numpy()
-                all_outputs.extend(probs.tolist())
+    # Explicit return for SonarQube
+    return None
 
-        # ----- 5️⃣  Align predictions with the original DataFrame index -----
-        padding = [np.nan] * (window - 1)
-        aligned = padding + all_outputs
 
-        if len(aligned) != len(df):
-            raise RegimeModelError(
-                f"Prediction length mismatch: expected {len(df)} values, got {len(aligned)}"
-            )
+# ------------------------------------------------------------------
+# Persistence helpers
+# ------------------------------------------------------------------
+def save(self, path: Union[str, pathlib.Path]) -> None:
+    """
+    Persist the *best* checkpoint (or the current model if no checkpoint
+    exists) to ``path``.  The file is a standard Torch ``.pt`` archive
+    containing:
 
-        return pd.Series(aligned, index=df.index, name="regime_probability")
+    * ``model_state_dict``
+    * ``optimizer_state_dict``
+    * ``scaler_state_dict``
+    * ``config`` (the merged configuration dict)
 
-    # ------------------------------------------------------------------
-    # Persistence helpers
-    # ------------------------------------------------------------------
-    def save(self, path: Union[str, pathlib.Path]) -> None:
-        """
-        Persist the *best* checkpoint (or the current model if no checkpoint
-        exists) to ``path``.  The file is a standard Torch ``.pt`` archive
-        containing:
+    ✅ FIXED: Safe checkpoint loading/saving (no arbitrary code execution)
+    """
+    dest = pathlib.Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
 
-        * ``model_state_dict``
-        * ``optimizer_state_dict``
-        * ``scaler_state_dict``
-        * ``config`` (the merged configuration dict)
-        
-        ✅ FIXED: Safe checkpoint loading/saving (no arbitrary code execution)
-        """
-        dest = pathlib.Path(path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-
-        # ✅ FIXED: Use safe alternative to torch.load()
-        # Before: torch.save(torch.load(self.best_checkpoint_path), dest)
-        # After:  Read file directly, validate structure, then save
-        
-        if self.best_checkpoint_path and self.best_checkpoint_path.is_file():
-            try:
-                # ✅ FIXED: Load with weights_only=True to prevent code injection
-                # This ensures only tensor data is loaded, not arbitrary Python objects
-                checkpoint = torch.load(
-                    self.best_checkpoint_path,
-                    map_location=self.device,
-                    weights_only=False  # Set to False only if absolutely need full checkpoint
-                )
-                
-                # Validate checkpoint structure before saving
-                required_keys = {"model_state_dict", "optimizer_state_dict", "scaler_state_dict"}
-                if not required_keys.issubset(checkpoint.keys()):
-                    raise RegimeModelError(
-                        f"Invalid checkpoint structure. Missing keys: "
-                        f"{required_keys - set(checkpoint.keys())}"
-                    )
-                
-                torch.save(checkpoint, dest)
-                LOGGER.info(f"Best checkpoint validated and copied to {dest}")
-                
-            except Exception as exc:
-                LOGGER.error(f"Failed to load/save best checkpoint: {exc}")
-                raise RegimeModelError(f"Checkpoint copy failed: {exc}") from exc
-        else:
-            # If no best checkpoint, save current model state
-            checkpoint = {
-                "model_state_dict": self.model.state_dict(),
-                "optimizer_state_dict": self.optimizer.state_dict(),
-                "scaler_state_dict": self.scaler.state_dict(),
-                "config": dict(self.cfg),
-            }
-            torch.save(checkpoint, dest)
-            LOGGER.info(f"Current model state saved to {dest}")
-
-    def load(self, path: Union[str, pathlib.Path]) -> None:
-        """
-        Load a previously saved checkpoint.
-        
-        ✅ FIXED: Safe checkpoint loading (validates structure, sets eval mode)
-        """
-        src = pathlib.Path(path)
-        if not src.is_file():
-            raise RegimeModelError(f"Checkpoint file not found: {src}")
-
-        # ✅ FIXED: Safe loading with validation
+    # -----------------------------------------------------------------
+    # If we have a validated best checkpoint, copy it safely
+    # -----------------------------------------------------------------
+    if self.best_checkpoint_path and self.best_checkpoint_path.is_file():
         try:
-            checkpoint = torch.load(src, map_location=self.device, weights_only=False)
-        except Exception as exc:
-            raise RegimeModelError(f"Failed to load checkpoint: {exc}") from exc
-
-        # -----------------------------------------------------------------
-        # 1️⃣  Restore configuration
-        # -----------------------------------------------------------------
-        loaded_cfg = checkpoint.get("config", {})
-        if loaded_cfg:
-            self.cfg = {**self.cfg, **loaded_cfg}
-            LOGGER.info("Configuration restored from checkpoint")
-
-        # -----------------------------------------------------------------
-        # 2️⃣  Determine input dimension from the scaler state
-        # -----------------------------------------------------------------
-        scaler_state = checkpoint.get("scaler_state_dict")
-        if scaler_state is None:
-            raise RegimeModelError("Checkpoint missing scaler state.")
-        dummy_scaler = StandardScaler()
-        dummy_scaler.mean_ = scaler_state["mean_"]
-        dummy_scaler.scale_ = scaler_state["scale_"]
-        input_dim = dummy_scaler.mean_.shape[0]
-
-        # -----------------------------------------------------------------
-        # 3️⃣  Re‑instantiate model & load weights
-        # -----------------------------------------------------------------
-        self._build_model(input_dim)
-        self.model.load_state_dict(checkpoint["model_state_dict"])
-        self.model.to(self.device)
-        self.model.eval()
-
-        # -----------------------------------------------------------------
-        # 4️⃣  Restore optimizer and scaler
-        # -----------------------------------------------------------------
-        if "optimizer_state_dict" in checkpoint:
-            self.optimizer = optim.Adam(
-                self.model.parameters(),
-                lr=float(self.cfg["lr"]),
-                weight_decay=float(self.cfg["weight_decay"]),
+            # Load with ``weights_only=True`` to avoid executing any
+            # embedded Python objects.  This is the safe alternative to a
+            # plain ``torch.load``.
+            checkpoint = torch.load(
+                self.best_checkpoint_path,
+                map_location=self.device,
+                weights_only=True,
             )
-            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-        self.scaler = dummy_scaler
-        LOGGER.info(f"Model, optimizer, and scaler loaded from {src}")
+            # Verify that the essential keys are present
+            required = {"model_state_dict", "optimizer_state_dict", "scaler_state_dict"}
+            if not required.issubset(checkpoint.keys()):
+                missing = required - set(checkpoint.keys())
+                raise RegimeModelError(
+                    f"Checkpoint missing required keys: {missing}"
+                )
 
-    # ------------------------------------------------------------------
-    # Representation
-    # ------------------------------------------------------------------
-    def __repr__(self) -> str:  # pragma: no cover
-        safe_cfg = {k: v for k, v in self.cfg.items() if k != "checkpoint_dir"}
-        cfg_pretty = json.dumps(safe_cfg, indent=2)
-        return (
-            f"<LSTMRegimeModel device={self.device} "
-            f"config={cfg_pretty}>"
+            torch.save(checkpoint, dest)
+            LOGGER.info(f"Best checkpoint safely copied to {dest}")
+
+        except Exception as exc:
+            LOGGER.error(f"Failed to copy best checkpoint: {exc}")
+            raise RegimeModelError(f"Checkpoint copy failed: {exc}") from exc
+
+    else:
+        # No checkpoint – save the current in‑memory state
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scaler_state_dict": self.scaler.state_dict(),
+            "config": dict(self.cfg),
+        }
+        torch.save(checkpoint, dest)
+        LOGGER.info(f"Current model state saved to {dest}")
+
+    # Explicit return for SonarQube
+    return None
+
+
+def load(self, path: Union[str, pathlib.Path]) -> None:
+    """
+    Load a previously saved checkpoint.
+
+    ✅ FIXED: Safe checkpoint loading (validated structure, eval mode)
+    """
+    src = pathlib.Path(path)
+    if not src.is_file():
+        raise RegimeModelError(f"Checkpoint file not found: {src}")
+
+    try:
+        # Load weights only – prevents execution of arbitrary code
+        checkpoint = torch.load(
+            src,
+            map_location=self.device,
+            weights_only=True,
         )
+    except Exception as exc:
+        raise RegimeModelError(f"Failed to load checkpoint: {exc}") from exc
+
+    # -----------------------------------------------------------------
+    # 1️⃣  Restore configuration (if present)
+    # -----------------------------------------------------------------
+    loaded_cfg = checkpoint.get("config", {})
+    if loaded_cfg:
+        self.cfg = {**self.cfg, **loaded_cfg}
+        LOGGER.info("Configuration restored from checkpoint")
+
+    # -----------------------------------------------------------------
+    # 2️⃣  Determine input dimension from the scaler state
+    # -----------------------------------------------------------------
+    scaler_state = checkpoint.get("scaler_state_dict")
+    if scaler_state is None:
+        raise RegimeModelError("Checkpoint missing scaler state.")
+    dummy_scaler = StandardScaler()
+    dummy_scaler.mean_ = scaler_state["mean_"]
+    dummy_scaler.scale_ = scaler_state["scale_"]
+    input_dim = dummy_scaler.mean_.shape[0]
+
+    # -----------------------------------------------------------------
+    # 3️⃣  Re‑instantiate model & load weights
+    # -----------------------------------------------------------------
+    self._build_model(input_dim)
+    self.model.load_state_dict(checkpoint["model_state_dict"])
+    self.model.to(self.device)
+    self.model.eval()                     # <-- ensure eval mode
+
+    # -----------------------------------------------------------------
+    # 4️⃣  Restore optimizer (if present) and scaler
+    # -----------------------------------------------------------------
+    if "optimizer_state_dict" in checkpoint:
+        self.optimizer = optim.Adam(
+            self.model.parameters(),
+            lr=float(self.cfg["lr"]),
+            weight_decay=float(self.cfg["weight_decay"]),
+        )
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    self.scaler = dummy_scaler
+    LOGGER.info(f"Model, optimizer, and scaler loaded from {src}")
+
+    # Explicit return for SonarQube
+    return None
+
+
+# ------------------------------------------------------------------
+# Representation
+# ------------------------------------------------------------------
+def __repr__(self) -> str:  # pragma: no cover
+    # Avoid leaking large objects (e.g., full config dict) in logs
+    safe_cfg = {k: v for k, v in self.cfg.items() if k != "checkpoint_dir"}
+    cfg_pretty = json.dumps(safe_cfg, indent=2)
+    return f"<LSTMRegimeModel device={self.device} config={cfg_pretty}>"
