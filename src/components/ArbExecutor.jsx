@@ -13,9 +13,16 @@ import axios from "axios";
 /**
  * Simple UI to manually fire a triangular arb.
  * In production you would probably hide this behind a feature flag.
+ *
+ * ✅ FIXED:
+ *   1. Changed initial state from 1.0 to 1 (no zero fraction in literal)
+ *   2. Changed parseFloat() to Number.parseFloat() (preferred method)
  */
 export default function ArbExecutor() {
-  const [grossProfit, setGrossProfit] = useState(1.0);
+  // ✅ FIXED: Use integer literal instead of zero-fraction decimal
+  // Before: const [grossProfit, setGrossProfit] = useState(1.0);
+  // After:  const [grossProfit, setGrossProfit] = useState(1);
+  const [grossProfit, setGrossProfit] = useState(1);
   const [status, setStatus] = useState({ open: false, text: "", severity: "info" });
   const [loading, setLoading] = useState(false);
 
@@ -29,7 +36,10 @@ export default function ArbExecutor() {
   const handleRun = async () => {
     setLoading(true);
     try {
-      const payload = { legs, gross_profit_pips: parseFloat(grossProfit) };
+      // ✅ FIXED: Use Number.parseFloat() instead of global parseFloat()
+      // Before: const payload = { legs, gross_profit_pips: parseFloat(grossProfit) };
+      // After:  const payload = { legs, gross_profit_pips: Number.parseFloat(grossProfit) };
+      const payload = { legs, gross_profit_pips: Number.parseFloat(grossProfit) };
       await axios.post("/api/arb/run", payload);
       setStatus({ open: true, text: "✅ Arb executed successfully", severity: "success" });
     } catch (e) {
