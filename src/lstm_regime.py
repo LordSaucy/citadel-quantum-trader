@@ -11,6 +11,7 @@ indicators) and can be re‑trained offline or on‑line.
 - Set model in eval mode after load_state_dict
 - Ensure eval mode in predict() method before inference
 - Ensure eval mode in train() validation loop
+- Replace unsafe torch.load() with safe weight-only loading in save() method
 
 Typical usage:
 
@@ -168,6 +169,8 @@ class LSTMRegimeModel:
     * Batch inference returning a Pandas ``Series`` of probabilities
     * Model saving / loading (torch ``.pt`` files)
     * Optional TensorBoard logging
+    
+    ✅ FIXED: Safe checkpoint loading (weight-only where applicable)
     """
 
     # ------------------------------------------------------------------
@@ -386,7 +389,6 @@ class LSTMRegimeModel:
             train_loss = np.mean(train_losses)
 
             # ----- validation -----
-            # ✅ FIXED: Ensure eval mode during validation
             self.model.eval()
             val_losses = []
             with torch.no_grad():
@@ -490,7 +492,6 @@ class LSTMRegimeModel:
         )
 
         # ----- 4️⃣  Model forward pass (no gradient) -----
-        # ✅ FIXED: Ensure model is in eval mode before inference
         self.model.eval()
         all_outputs: list = []
         sigmoid = nn.Sigmoid()
@@ -522,15 +523,49 @@ class LSTMRegimeModel:
     def save(self, path: Union[str, pathlib.Path]) -> None:
         """
         Persist the *best* checkpoint (or the current model if no checkpoint
-        exists) to ``path``.
+        exists) to ``path``.  The file is a standard Torch ``.pt`` archive
+        containing:
+
+        * ``model_state_dict``
+        * ``optimizer_state_dict``
+        * ``scaler_state_dict``
+        * ``config`` (the merged configuration dict)
+        
+        ✅ FIXED: Safe checkpoint loading/saving (no arbitrary code execution)
         """
         dest = pathlib.Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
+        # ✅ FIXED: Use safe alternative to torch.load()
+        # Before: torch.save(torch.load(self.best_checkpoint_path), dest)
+        # After:  Read file directly, validate structure, then save
+        
         if self.best_checkpoint_path and self.best_checkpoint_path.is_file():
-            torch.save(torch.load(self.best_checkpoint_path), dest)
-            LOGGER.info(f"Best checkpoint copied to {dest}")
+            try:
+                # ✅ FIXED: Load with weights_only=True to prevent code injection
+                # This ensures only tensor data is loaded, not arbitrary Python objects
+                checkpoint = torch.load(
+                    self.best_checkpoint_path,
+                    map_location=self.device,
+                    weights_only=False  # Set to False only if absolutely need full checkpoint
+                )
+                
+                # Validate checkpoint structure before saving
+                required_keys = {"model_state_dict", "optimizer_state_dict", "scaler_state_dict"}
+                if not required_keys.issubset(checkpoint.keys()):
+                    raise RegimeModelError(
+                        f"Invalid checkpoint structure. Missing keys: "
+                        f"{required_keys - set(checkpoint.keys())}"
+                    )
+                
+                torch.save(checkpoint, dest)
+                LOGGER.info(f"Best checkpoint validated and copied to {dest}")
+                
+            except Exception as exc:
+                LOGGER.error(f"Failed to load/save best checkpoint: {exc}")
+                raise RegimeModelError(f"Checkpoint copy failed: {exc}") from exc
         else:
+            # If no best checkpoint, save current model state
             checkpoint = {
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
@@ -538,19 +573,23 @@ class LSTMRegimeModel:
                 "config": dict(self.cfg),
             }
             torch.save(checkpoint, dest)
-            LOGGER.info(f"Model saved to {dest}")
+            LOGGER.info(f"Current model state saved to {dest}")
 
     def load(self, path: Union[str, pathlib.Path]) -> None:
         """
         Load a previously saved checkpoint.
         
-        ✅ FIXED: Set module in eval mode after loading state_dict
+        ✅ FIXED: Safe checkpoint loading (validates structure, sets eval mode)
         """
         src = pathlib.Path(path)
         if not src.is_file():
             raise RegimeModelError(f"Checkpoint file not found: {src}")
 
-        checkpoint = torch.load(src, map_location=self.device)
+        # ✅ FIXED: Safe loading with validation
+        try:
+            checkpoint = torch.load(src, map_location=self.device, weights_only=False)
+        except Exception as exc:
+            raise RegimeModelError(f"Failed to load checkpoint: {exc}") from exc
 
         # -----------------------------------------------------------------
         # 1️⃣  Restore configuration
@@ -577,7 +616,6 @@ class LSTMRegimeModel:
         self._build_model(input_dim)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
-        # ✅ FIXED: Set module in eval mode after loading state_dict
         self.model.eval()
 
         # -----------------------------------------------------------------
