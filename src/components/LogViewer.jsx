@@ -11,15 +11,17 @@ import {
 } from "@mui/material";
 
 // =====================================================================
-// Log entry generator – produces stable unique IDs for each log line
+// ✅ FIXED: Convert LogEntry class to factory function
+// Before: class LogEntry { constructor(content) { ... } }
+// After:  function createLogEntry(content) { return { ... } }
 // =====================================================================
 let logEntryCounter = 0;
 
-class LogEntry {
-  constructor(content) {
-    this.id = `log-${logEntryCounter++}`;
-    this.content = content;
-  }
+function createLogEntry(content) {
+  return {
+    id: `log-${logEntryCounter++}`,
+    content: content,
+  };
 }
 
 // =====================================================================
@@ -60,7 +62,8 @@ export default function LogViewer() {
     eventSourceRef.current = es;
 
     es.onmessage = (e) => {
-      const logEntry = new LogEntry(e.data);
+      // ✅ FIXED: Use factory function instead of class
+      const logEntry = createLogEntry(e.data);
       setLogLines((prev) => [...prev, logEntry].slice(-500)); // keep last 500 lines
     };
 
