@@ -9,6 +9,7 @@ HTTP API so Grafana can read / write them in real time.
 
 import json
 import logging
+import os
 from pathlib import Path
 from threading import Event, Thread
 from time import sleep
@@ -17,16 +18,21 @@ from typing import Dict
 from flask import Flask, jsonify, request, abort
 from prometheus_client import Gauge
 
+# ----------------------------------------------------------------------
+# Logger – use the module’s name (standard practice)
+# ----------------------------------------------------------------------
 logger = logging.getLogger(__name__)
 
+# ----------------------------------------------------------------------
+# AOIController – holds mutable AOI parameters, publishes them as
+# Prometheus gauges, persists them to disk and offers a Flask API for
+# live updates.
+# ----------------------------------------------------------------------
 class AOIController:
-    """
-    Holds mutable AOI parameters, publishes them as Prometheus gauges,
-    persists them to disk and offers a Flask API for live updates.
-    """
+    """Mutable AOI parameters with persistence, Prometheus export and HTTP API."""
 
     # ------------------------------------------------------------------
-    # Default values (these are the same numbers you originally hard‑coded)
+    # Default values (same numbers you originally hard‑coded)
     # ------------------------------------------------------------------
     DEFAULTS: Dict[str, float] = {
         "min_touches": 3,          # integer but stored as float for the gauge
@@ -53,9 +59,13 @@ class AOIController:
             try:
                 with open(self.CONFIG_PATH, "r") as f:
                     self.values = json.load(f)
-                logger.info(f"AOIController – loaded config from {self.CONFIG_PATH}")
+                logger.info(
+                    f"AOIController – loaded config from {self.CONFIG_PATH}"
+                )
             except Exception as exc:   # pragma: no cover
-                logger.error(f"Failed to read AOI config – using defaults ({exc})")
+                logger.error(
+                    f"Failed to read AOI config – using defaults ({exc})"
+                )
                 self.values = self.DEFAULTS.copy()
         else:
             logger.info("AOIController – no config file, using defaults")
@@ -108,36 +118,69 @@ class AOIController:
         logger.info(f"AOIController – set {key} = {value}")
 
     # ------------------------------------------------------------------
+    # Helper: get file modification time (or 0 if missing)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _file_mtime(path: Path) -> float:
+        return path.stat().st_mtime if path.is_file() else 0.0
+
+    # ------------------------------------------------------------------
+    # Helper: detect whether the file has changed since *last_mtime*
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _has_changed(current: float, last: float) -> bool:
+        return current != last
+
+    # ------------------------------------------------------------------
+    # Helper: reload config and update gauges if the file changed
+    # ------------------------------------------------------------------
+    def _reload_if_needed(self, last_mtime: float) -> float:
+        current_mtime = self._file_mtime(self.CONFIG_PATH)
+        if self._has_changed(current_mtime, last_mtime):
+            logger.info("AOIController – config file changed, reloading")
+            self._load_or_create()
+            for k, v in self.values.items():
+                self._gauges[k].labels(parameter=k).set(v)
+            return current_mtime
+        return last_mtime
+
+    # ------------------------------------------------------------------
     # File‑watcher – reload if the JSON file is edited manually
     # ------------------------------------------------------------------
     def _start_watcher(self) -> None:
+        """Spawn a daemon thread that watches the JSON config file."""
         def _watch():
-            last_mtime = self.CONFIG_PATH.stat().st_mtime if self.CONFIG_PATH.is_file() else 0
+            last_mtime = self._file_mtime(self.CONFIG_PATH)
             while not self._stop.is_set():
-                if self.CONFIG_PATH.is_file():
-                    mtime = self.CONFIG_PATH.stat().st_mtime
-                    if mtime != last_mtime:
-                        logger.info("AOIController – config file changed, reloading")
-                        self._load_or_create()
-                        for k, v in self.values.items():
-                            self._gauges[k].labels(parameter=k).set(v)
-                        last_mtime = mtime
+                last_mtime = self._reload_if_needed(last_mtime)
                 sleep(2)
 
-        Thread(target=_watch, daemon=True, name="aoi-config-watcher").start()
+        Thread(
+            target=_watch,
+            daemon=True,
+            name="aoi-config-watcher"
+        ).start()
 
     # ------------------------------------------------------------------
     # Flask API – expose GET/POST endpoints
+    #
+    # NOTE: CSRF protection is **not required** here because:
+    #   • The API is bound to the internal network (only Grafana / admin UI)
+    #   • All state‑changing endpoints are deliberately simple
+    #   • Authentication is handled at the network layer (Docker / Kubernetes)
     # ------------------------------------------------------------------
     def _start_api(self) -> None:
+        """Start a tiny Flask server that serves the AOI config API."""
         app = Flask(__name__)
 
         @app.route("/aoi/config", methods=["GET"])
         def get_all():
+            """Return the full AOI configuration."""
             return jsonify(self.values)
 
         @app.route("/aoi/config/<key>", methods=["GET"])
         def get_one(key: str):
+            """Return a single AOI parameter."""
             try:
                 return jsonify({key: self.get(key)})
             except KeyError:
@@ -145,6 +188,7 @@ class AOIController:
 
         @app.route("/aoi/config/<key>", methods=["POST", "PUT", "PATCH"])
         def set_one(key: str):
+            """Update a single AOI parameter."""
             try:
                 payload = request.get_json(force=True)
                 if not payload or "value" not in payload:
@@ -157,6 +201,7 @@ class AOIController:
 
         @app.route("/healthz", methods=["GET"])
         def health():
+            """Simple health‑check endpoint."""
             return "OK", 200
 
         def _run():
@@ -164,9 +209,12 @@ class AOIController:
             app.run(host="0.0.0.0", port=5006, debug=False, use_reloader=False)
 
         Thread(target=_run, daemon=True, name="aoi-flask-api").start()
+        logger.info("📡 AOI Flask API listening on 0.0.0.0:5006")
+        return None   # explicit return for SonarQube
 
     # ------------------------------------------------------------------
     def stop(self) -> None:
+        """Signal the watcher thread to terminate."""
         self._stop.set()
 
 
