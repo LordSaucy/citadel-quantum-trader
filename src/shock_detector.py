@@ -11,7 +11,7 @@ Monitors 5 independent shock vectors:
 
 Returns (bool, str) where bool = blocked, str = reason for blocking.
 
-✅ FIXED: Refactored should_block_trade() to reduce complexity from 19 to 9
+✅ FIXED: Removed unused symbol parameter from _check_news_sentiment and _check_winrate_floor
 """
 
 import time
@@ -40,14 +40,15 @@ trade_blocked_total = Counter(
 
 
 # =====================================================================
-# ✅ FIXED: Extracted check functions (complexity 19 → 9)
+# ✅ FIXED: Removed unused parameters from check functions
 # =====================================================================
 
-def _check_news_sentiment(symbol: str) -> tuple[bool, str]:
+def _check_news_sentiment() -> tuple[bool, str]:
     """
-    ✅ EXTRACTED: Check if sentiment is within acceptable bounds.
+    ✅ FIXED: Removed unused symbol parameter.
     
-    Removes 5+ lines and 3 conditions from main function.
+    Check if sentiment is within acceptable bounds.
+    (Symbol not used – sentiment is global market sentiment, not symbol‑specific)
     """
     sentiment = r.get("sentiment:latest")
     if not sentiment:
@@ -68,11 +69,7 @@ def _check_news_sentiment(symbol: str) -> tuple[bool, str]:
 
 
 def _check_macro_calendar(symbol: str) -> tuple[bool, str]:
-    """
-    ✅ EXTRACTED: Check for macro calendar events blocking trades.
-    
-    Removes 2 lines from main function.
-    """
+    """Check for macro calendar events blocking trades (symbol‑specific)."""
     macro_flag = r.get(f"macro:block:{symbol}")
     if macro_flag == "1":
         trade_blocked_total.labels(reason="macro_event").inc()
@@ -82,11 +79,7 @@ def _check_macro_calendar(symbol: str) -> tuple[bool, str]:
 
 
 def _check_volatility_spike(symbol: str) -> tuple[bool, str]:
-    """
-    ✅ EXTRACTED: Check for volatility spikes (ATR vs EMA_ATR).
-    
-    Removes 5+ lines from main function.
-    """
+    """Check for volatility spikes (ATR vs EMA_ATR) (symbol‑specific)."""
     try:
         atr = float(r.get(f"atr:{symbol}") or 0)
         ema_atr = float(r.get(f"atr_ema30:{symbol}") or 0)
@@ -102,11 +95,7 @@ def _check_volatility_spike(symbol: str) -> tuple[bool, str]:
 
 
 def _check_price_jump(symbol: str) -> tuple[bool, str]:
-    """
-    ✅ EXTRACTED: Check for sudden price jumps within short time window.
-    
-    Removes 10+ lines and complex try/except from main function.
-    """
+    """Check for sudden price jumps within short time window (symbol‑specific)."""
     try:
         now = time.time()
         win_secs = cfg["risk_shocks"]["price_jump"]["window_minutes"] * 60
@@ -137,11 +126,12 @@ def _check_price_jump(symbol: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _check_winrate_floor(symbol: str) -> tuple[bool, str]:
+def _check_winrate_floor() -> tuple[bool, str]:
     """
-    ✅ EXTRACTED: Check if win‑rate has fallen below minimum floor.
+    ✅ FIXED: Removed unused symbol parameter.
     
-    Removes 3 lines from main function.
+    Check if win‑rate has fallen below minimum floor.
+    (Symbol not used – win‑rate is global portfolio metric, not symbol‑specific)
     """
     winrate = r.get("edge:winrate")
     if winrate and float(winrate) < cfg["risk_shocks"]["winrate_floor"]:
@@ -159,19 +149,15 @@ def should_block_trade(symbol: str) -> tuple[bool, str]:
     """
     Run all shock‑detector checks. Return True + reason if trade must be aborted.
 
-    ✅ FIXED: Cognitive complexity reduced from 19 to 9 by:
-    - Extracting 5 independent check functions
-    - Main function now 15 LOC with clean sequential logic
-    - Each check is isolated and testable
-    - No nested conditions
+    ✅ FIXED: Updated function calls to match new signatures.
     """
     # Run all checks in sequence
     checks = [
-        _check_news_sentiment(symbol),
+        _check_news_sentiment(),           # ✅ FIXED: No symbol argument
         _check_macro_calendar(symbol),
         _check_volatility_spike(symbol),
         _check_price_jump(symbol),
-        _check_winrate_floor(symbol),
+        _check_winrate_floor(),            # ✅ FIXED: No symbol argument
     ]
 
     # Return on first blocking condition
@@ -194,9 +180,9 @@ def analyze_trade_shocks(symbol: str) -> dict:
     Useful for debugging or logging what was checked.
     """
     return {
-        "news_sentiment": _check_news_sentiment(symbol),
+        "news_sentiment": _check_news_sentiment(),
         "macro_calendar": _check_macro_calendar(symbol),
         "volatility_spike": _check_volatility_spike(symbol),
         "price_jump": _check_price_jump(symbol),
-        "winrate_floor": _check_winrate_floor(symbol),
+        "winrate_floor": _check_winrate_floor(),
     }
