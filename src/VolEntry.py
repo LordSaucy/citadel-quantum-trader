@@ -2,7 +2,8 @@
 """
 VolEntry.py – Production‑ready volatility‑entry refinement system.
 
-✅ FIXED: Removed f-string with no replacement fields
+✅ FIXED: Removed unused local variable `rates_m15` from analyze_entry_timing()
+The method only uses rates_h1 for all calculations; rates_m15 was never referenced.
 """
 
 import json
@@ -58,9 +59,7 @@ class VolEntryController:
             try:
                 with open(self.CONFIG_PATH, "r") as f:
                     self.values = json.load(f)
-                logger.info(
-                    f"VolEntryController – loaded config from {self.CONFIG_PATH}"
-                )
+                logger.info(f"VolEntryController – loaded config from {self.CONFIG_PATH}")
             except Exception as exc:
                 logger.error(f"Failed to read config – using defaults ({exc})")
                 self.values = self.DEFAULTS.copy()
@@ -102,23 +101,15 @@ class VolEntryController:
     def get(self, key: str) -> float:
         return self.values[key]
 
-    # ✅ SECURITY FIX: Secure SECRET_KEY management
     def _get_or_create_secret_key(self) -> str:
         """
-        ✅ SECURITY FIX: Retrieve SECRET_KEY from environment or generate/persist one.
-        
-        Priority:
-        1. FLASK_VOLENTRY_SECRET_KEY environment variable
-        2. Persisted key file
-        3. Generate new cryptographically-secure key
+        Retrieve SECRET_KEY from environment or generate/persist one.
         """
-        # 1. Check environment variable
         env_key = os.getenv('FLASK_VOLENTRY_SECRET_KEY')
         if env_key:
             logger.info("📌 VolEntry SECRET_KEY loaded from FLASK_VOLENTRY_SECRET_KEY environment variable")
             return env_key
         
-        # 2. Check persisted key file
         secret_file = Path("/app/config/volentry_secret_key")
         if secret_file.exists():
             try:
@@ -130,10 +121,8 @@ class VolEntryController:
             except Exception as exc:
                 logger.warning(f"⚠️ Could not read persisted VolEntry SECRET_KEY: {exc}")
         
-        # 3. Generate new cryptographically-secure key
         new_key = secrets.token_urlsafe(32)
         
-        # Persist for consistency across restarts
         try:
             secret_file.parent.mkdir(parents=True, exist_ok=True)
             with open(secret_file, 'w') as f:
@@ -235,10 +224,20 @@ class VolatilityEntryRefinement:
     def __init__(self) -> None:
         logger.info("Volatility Entry Refinement initialised")
 
-    def analyze_entry_timing(self, symbol: str, direction: str, proposed_entry: float) -> VolatilityEntry:
+    # =====================================================================
+    # ✅ FIXED: Removed unused `rates_m15` variable
+    # Before: rates_m15 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 400)
+    # After:  Removed – only rates_h1 is used throughout the method
+    # =====================================================================
+    def analyze_entry_timing(
+        self,
+        symbol: str,
+        direction: str,
+        proposed_entry: float,
+    ) -> VolatilityEntry:
         """Analyse entry timing based on volatility."""
+        # ✅ FIXED: Load only rates_h1 (rates_m15 was never used)
         rates_h1 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, 200)
-        rates_m15 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 400)
 
         if rates_h1 is None or len(rates_h1) < 20:
             return self._default_entry(proposed_entry)
@@ -308,10 +307,15 @@ class VolatilityEntryRefinement:
         if volatility_state == "CONTRACTING" and in_consolidation:
             return False, "Consolidation + contracting – wait for breakout"
         if volatility_state == "LOW_VOLATILE" and in_consolidation:
-            return False, "Low vol consolidation – wait for expansion"
+            return False, "Low volatility consolidation – wait for expansion"
         return True, None
 
-    def _calculate_optimal_entry_range(self, proposed_entry: float, atr: float, direction: str) -> Tuple[float, float]:
+    def _calculate_optimal_entry_range(
+        self,
+        proposed_entry: float,
+        atr: float,
+        direction: str,
+    ) -> Tuple[float, float]:
         """Calculate optimal entry range."""
         factor = float(vol_entry_controller.get("optimal_range_factor"))
         range_width = atr * factor
@@ -319,7 +323,13 @@ class VolatilityEntryRefinement:
             return proposed_entry - range_width, proposed_entry
         return proposed_entry, proposed_entry + range_width
 
-    def _refine_entry_price(self, proposed_entry: float, atr: float, direction: str, volatility_state: str) -> float:
+    def _refine_entry_price(
+        self,
+        proposed_entry: float,
+        atr: float,
+        direction: str,
+        volatility_state: str,
+    ) -> float:
         """Refine entry price."""
         adjust_factor = float(vol_entry_controller.get("refine_adjust_factor"))
         if volatility_state == "EXPANDING":
@@ -330,7 +340,11 @@ class VolatilityEntryRefinement:
             delta = atr * (adjust_factor * 0.8)
         return proposed_entry - delta if direction.upper() == "BUY" else proposed_entry + delta
 
-    def _calculate_entry_confidence(self, volatility_state: str, in_consolidation: bool) -> float:
+    def _calculate_entry_confidence(
+        self,
+        volatility_state: str,
+        in_consolidation: bool,
+    ) -> float:
         """Calculate confidence score."""
         confidence = float(vol_entry_controller.get("min_confidence"))
         if volatility_state == "EXPANDING":
@@ -347,7 +361,15 @@ class VolatilityEntryRefinement:
 
     def _default_entry(self, proposed_entry: float) -> VolatilityEntry:
         """Default entry."""
-        return VolatilityEntry(True, proposed_entry, 50.0, 0.0, "UNKNOWN", None, (proposed_entry, proposed_entry))
+        return VolatilityEntry(
+            True,
+            proposed_entry,
+            50.0,
+            0.0,
+            "UNKNOWN",
+            None,
+            (proposed_entry, proposed_entry)
+        )
 
     def get_position_size_adjustment(self, volatility_state: str) -> float:
         """Get position size adjustment."""
