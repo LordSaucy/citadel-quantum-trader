@@ -554,7 +554,7 @@ class LSTMRegimeModel:
             torch.save(torch.load(self.best_checkpoint_path), dest)
             LOGGER.info(f"Best checkpoint copied to {dest}")
         else:
-            checkpoint = {
+            checkpoint = { 
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "scaler_state_dict": self.scaler.state_dict(),
