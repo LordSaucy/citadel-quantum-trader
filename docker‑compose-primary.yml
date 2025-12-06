@@ -1,0 +1,275 @@
+version: '3.9'
+
+# =====================================================================
+# CITADEL QUANTUM TRADER - PRIMARY TRADING ENGINE
+# =====================================================================
+# VPS: voc-g-2c-8gb-50s (2 vCPU, 8GB RAM, 50GB SSD)
+# Location: New Jersey (primary datacenter)
+# Cost: $72/mo
+#
+# Containers:
+#  1. citadel-quantum-trader (FastAPI engine)
+#  2. PostgreSQL 14 (immutable ledger)
+#  3. Redis (cache)
+#  4. pgBouncer (connection pooling)
+#
+# =====================================================================
+
+services:
+  # ===================================================================
+  # CITADEL QUANTUM TRADER ENGINE
+  # ===================================================================
+  engine:
+    image: citadel-quantum-trader:latest
+    container_name: cqt_engine_primary
+    restart: always
+    networks:
+      - trading
+    ports:
+      - "8000:8000"
+    environment:
+      # ---- Application Configuration ----
+      ENV: production
+      LOG_LEVEL: info
+      
+      # ---- Database Configuration ----
+      DATABASE_URL: postgresql://cqt_user:${DB_PASSWORD}@pgbouncer:6432/citadel_trades
+      DATABASE_POOL_SIZE: 20
+      DATABASE_MAX_OVERFLOW: 10
+      
+      # ---- Redis Configuration ----
+      REDIS_URL: redis://redis:6379/0
+      REDIS_CLUSTER_ENABLED: "false"
+      REDIS_TIMEOUT: 5
+      
+      # ---- Broker Configuration (LIVE MODE) ----
+      MT5_MODE: live
+      MT5_BROKER: ${MT5_BROKER}
+      MT5_LOGIN: ${MT5_LOGIN}
+      MT5_PASSWORD: ${MT5_PASSWORD}
+      MT5_SERVER: ${MT5_SERVER}
+      
+      IBKR_ENV: live
+      IBKR_ACCOUNT: ${IBKR_ACCOUNT}
+      IBKR_API_KEY: ${IBKR_API_KEY}
+      
+      # ---- Trading Configuration ----
+      RISK_FRACTION: ${RISK_FRACTION:-0.01}
+      MAX_LOSS_PER_DAY: ${MAX_LOSS_PER_DAY:-0.05}
+      
+      # ---- Kill-Switch Configuration (CRITICAL) ----
+      CQT_KILL_SWITCH: "1"
+      KILL_SWITCH_LOSS_THRESHOLD: 0.03
+      KILL_SWITCH_DISCONNECTION_TIMEOUT: 30
+      
+      # ---- Monitoring ----
+      PROMETHEUS_ENABLED: "true"
+      PROMETHEUS_PORT: 8001
+      OTEL_ENABLED: "true"
+      
+      # ---- Network Configuration ----
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      
+      # ---- Replication (for Standby) ----
+      REPLICATION_MODE: primary
+      REPLICATION_SLOT_NAME: standby_replica
+      
+    volumes:
+      - engine_logs:/app/logs
+      - engine_cache:/app/cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # ===================================================================
+  # POSTGRESQL 14 (PRIMARY DATABASE)
+  # ===================================================================
+  postgres:
+    image: postgres:14-alpine
+    container_name: cqt_postgres_primary
+    restart: always
+    networks:
+      - trading
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: cqt_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: citadel_trades
+      POSTGRES_INITDB_ARGS: "-c max_connections=200 -c shared_buffers=2GB -c effective_cache_size=6GB"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_wal:/var/lib/postgresql/wal
+      - postgres_backups:/var/lib/postgresql/backups
+      - ./postgres_init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./postgres_replication.sql:/docker-entrypoint-initdb.d/02-replication.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cqt_user -d citadel_trades"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_senders=3"
+      - "-c"
+      - "wal_keep_size=1GB"
+      - "-c"
+      - "hot_standby=on"
+      - "-c"
+      - "archive_mode=on"
+      - "-c"
+      - "archive_command=mkdir -p /var/lib/postgresql/wal && cp %p /var/lib/postgresql/wal/%f"
+      - "-c"
+      - "archive_timeout=300"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # ===================================================================
+  # PGBOUNCER (CONNECTION POOLING)
+  # ===================================================================
+  pgbouncer:
+    image: pgbouncer:latest
+    container_name: cqt_pgbouncer
+    restart: always
+    networks:
+      - trading
+    ports:
+      - "6432:6432"
+    environment:
+      DATABASES_HOST: postgres
+      DATABASES_PORT: 5432
+      DATABASES_USER: cqt_user
+      DATABASES_PASSWORD: ${DB_PASSWORD}
+      DATABASES_DBNAME: citadel_trades
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: 1000
+      PGBOUNCER_DEFAULT_POOL_SIZE: 25
+      PGBOUNCER_MIN_POOL_SIZE: 10
+      PGBOUNCER_RESERVE_POOL_SIZE: 5
+      PGBOUNCER_RESERVE_POOL_TIMEOUT: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "psql", "-U", "cqt_user", "-d", "citadel_trades", "-c", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ===================================================================
+  # REDIS (CACHE & SESSION STORE)
+  # ===================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: cqt_redis_primary
+    restart: always
+    networks:
+      - trading
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command:
+      - redis-server
+      - /usr/local/etc/redis/redis.conf
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - "everysec"
+      - --maxmemory
+      - "2gb"
+      - --maxmemory-policy
+      - "allkeys-lru"
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ===================================================================
+  # PROMETHEUS (METRICS SCRAPING) - Optional on Primary
+  # ===================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: cqt_prometheus_primary
+    restart: always
+    networks:
+      - trading
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+networks:
+  trading:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  postgres_wal:
+    driver: local
+  postgres_backups:
+    driver: local
+  redis_data:
+    driver: local
+  engine_logs:
+    driver: local
+  engine_cache:
+    driver: local
+  prometheus_data:
+    driver: local
