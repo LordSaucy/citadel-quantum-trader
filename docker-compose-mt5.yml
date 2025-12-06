@@ -1,0 +1,277 @@
+version: '3.9'
+
+# =====================================================================
+# CITADEL QUANTUM TRADER - MT5 TERMINAL
+# =====================================================================
+# VPS: voc-g-1c-4gb-30s (1 vCPU, 4GB RAM, 30GB SSD)
+# Location: New Jersey (same as Primary for lowest latency)
+# Cost: $36/mo
+#
+# Purpose: Dedicated broker connection & order routing
+# Connection: WireGuard tunnel to Primary Engine (TCP/SSL)
+#
+# Containers:
+#  1. MetaTrader 5 (Linux terminal)
+#  2. API Bridge (order routing to Primary)
+#  3. Order Router (smart order execution)
+#
+# Design: Stateless - all data flows to Primary
+# Failover: Can restart anytime without data loss
+#
+# =====================================================================
+
+services:
+  # ===================================================================
+  # METATRADER 5 TERMINAL
+  # ===================================================================
+  metatrader5:
+    image: mt5-terminal:latest
+    container_name: cqt_mt5_terminal
+    restart: always
+    networks:
+      - trading
+    environment:
+      # ---- MT5 Broker Configuration ----
+      MT5_BROKER: ${MT5_BROKER}
+      MT5_LOGIN: ${MT5_LOGIN}
+      MT5_PASSWORD: ${MT5_PASSWORD}
+      MT5_SERVER: ${MT5_SERVER}
+      MT5_MODE: live
+      
+      # ---- Terminal Configuration ----
+      TERMINAL_MODE: daemon
+      TERMINAL_AUTOSTART: "true"
+      TERMINAL_LOGGING: "true"
+      TERMINAL_DATA_PATH: /var/lib/mt5/data
+      
+      # ---- Connection Configuration ----
+      API_BRIDGE_HOST: api_bridge
+      API_BRIDGE_PORT: 9000
+      
+      # ---- Performance Tuning ----
+      TERMINAL_TICKS_BUFFER: 1000
+      TERMINAL_MAX_CONNECTIONS: 10
+      
+    volumes:
+      - mt5_data:/var/lib/mt5/data
+      - mt5_logs:/var/lib/mt5/logs
+      - ./mt5_config.ini:/var/lib/mt5/config.ini
+    healthcheck:
+      test: ["CMD", "ps", "aux", "grep", "terminal64"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    expose:
+      - "443"  # Broker socket (internal)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # ===================================================================
+  # API BRIDGE (Order Routing to Primary)
+  # ===================================================================
+  api_bridge:
+    image: citadel-api-bridge:latest
+    container_name: cqt_api_bridge
+    restart: always
+    networks:
+      - trading
+    ports:
+      - "9000:9000"
+    environment:
+      # ---- API Server Configuration ----
+      BRIDGE_HOST: 0.0.0.0
+      BRIDGE_PORT: 9000
+      BRIDGE_WORKERS: 4
+      BRIDGE_TIMEOUT: 30
+      
+      # ---- Primary Engine Connection ----
+      PRIMARY_ENGINE_URL: https://${PRIMARY_ENGINE_IP}:8000
+      PRIMARY_ENGINE_WG_IP: 10.0.0.1
+      SSL_VERIFY: "true"
+      SSL_CERT: /etc/ssl/certs/ca-certificates.crt
+      
+      # ---- MT5 Terminal Connection ----
+      MT5_BRIDGE_HOST: metatrader5
+      MT5_BRIDGE_PORT: 443
+      MT5_TIMEOUT: 5
+      
+      # ---- Order Routing Configuration ----
+      ORDER_ROUTING_STRATEGY: best_execution
+      ORDER_TIMEOUT: 10
+      FILL_TIMEOUT: 30
+      ORDER_RETRY_COUNT: 3
+      ORDER_RETRY_DELAY: 1000
+      
+      # ---- Monitoring ----
+      PROMETHEUS_ENABLED: "true"
+      PROMETHEUS_PORT: 8001
+      HEALTH_CHECK_INTERVAL: 5
+      
+      # ---- Logging ----
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      
+    volumes:
+      - bridge_logs:/app/logs
+      - ./certificates:/etc/ssl/certs
+      - ./wireguard.conf:/etc/wireguard/wg0.conf
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:9000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      metatrader5:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # ===================================================================
+  # ORDER ROUTER (Smart Execution)
+  # ===================================================================
+  order_router:
+    image: citadel-order-router:latest
+    container_name: cqt_order_router
+    restart: always
+    networks:
+      - trading
+    environment:
+      # ---- Router Configuration ----
+      ROUTER_MODE: smart_execution
+      ROUTER_STRATEGY: best_price
+      ROUTER_LOG_LEVEL: debug
+      
+      # ---- Broker Configuration ----
+      BROKER_PRIMARY: mt5
+      BROKER_SECONDARY: none
+      
+      # ---- Slippage Management ----
+      MAX_SLIPPAGE_PIPS: 2.0
+      MAX_SLIPPAGE_PERCENT: 0.01
+      SLIPPAGE_ALERT_THRESHOLD: 1.0
+      
+      # ---- Latency Monitoring ----
+      MEASURE_LATENCY: "true"
+      LATENCY_WARN_THRESHOLD: 100
+      LATENCY_CRITICAL_THRESHOLD: 500
+      
+      # ---- Connection to Primary Engine ----
+      PRIMARY_ENGINE_URL: https://${PRIMARY_ENGINE_IP}:8000
+      HEARTBEAT_INTERVAL: 5
+      
+      # ---- Order Ledger Sync ----
+      SYNC_FILLED_ORDERS: "true"
+      SYNC_INTERVAL: 10
+      BACKLOG_MAX_SIZE: 1000
+      
+    volumes:
+      - router_logs:/app/logs
+      - router_cache:/app/cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:9001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    ports:
+      - "9001:9001"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # ===================================================================
+  # WIREGUARD VPN (Encrypted Tunnel to Primary)
+  # ===================================================================
+  wireguard:
+    image: linuxserver/wireguard:latest
+    container_name: cqt_wireguard_mt5
+    restart: always
+    networks:
+      - trading
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: UTC
+      SERVERURL: ${STANDBY_VPS_IP}
+      SERVERPORT: 51820
+      PEERS: 1
+      PEERDNS: 8.8.8.8
+      ALLOWEDIPS: 10.0.0.0/24
+    volumes:
+      - wireguard_config:/config
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "51820:51820/udp"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    healthcheck:
+      test: ["CMD", "wg", "show"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ===================================================================
+  # PROMETHEUS NODE EXPORTER (Metrics)
+  # ===================================================================
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: cqt_node_exporter_mt5
+    restart: always
+    networks:
+      - trading
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    expose:
+      - "9100"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+
+networks:
+  trading:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  mt5_data:
+    driver: local
+  mt5_logs:
+    driver: local
+  bridge_logs:
+    driver: local
+  router_logs:
+    driver: local
+  router_cache:
+    driver: local
+  wireguard_config:
+    driver: local
